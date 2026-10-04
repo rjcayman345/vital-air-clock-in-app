@@ -405,7 +405,7 @@ render();
       firebase.initializeApp(cfg.firebase);
       firebase.auth().onAuthStateChanged(u=>{admin=isAdminUser(u);if(admin)showLogin=false;render()});
       try{await new Promise(r=>{const un=firebase.auth().onAuthStateChanged(()=>{un();r()})});
-        if(!firebase.auth().currentUser)await firebase.auth().signInAnonymously()}catch(e){console.warn("sign-in failed",e);banner("Sign-in to the shared timesheet failed. Turn on Anonymous sign-in in Firebase (Authentication ▸ Sign-in method).")}
+        if(!firebase.auth().currentUser)await firebase.auth().signInAnonymously()}catch(e){console.warn("sign-in failed",e);banner("Sign-in to the shared timesheet failed ("+((e&&e.code)||(e&&e.message)||"unknown")+"). "+(/operation-not-allowed|admin-restricted/.test((e&&e.code)||"")?"Turn on Anonymous sign-in in Firebase (Authentication ▸ Sign-in method).":/network/.test((e&&e.code)||"")?"Check this phone's internet connection.":"Send this code to the developer."))}
       db=firebase.firestore();
       try{await db.enablePersistence({synchronizeTabs:true})}catch(e){}
     }
