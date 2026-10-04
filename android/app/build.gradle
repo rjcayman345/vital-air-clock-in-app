@@ -17,12 +17,15 @@ android {
         }
     }
     signingConfigs {
-        // Same key on every build, so a new APK can install over the old one.
+        // Same key on every build, so a new APK can install over the old one. The key comes from GitHub
+        // secrets (the workflow writes vitalair.keystore); without it the build uses Android's default debug key.
         debug {
-            storeFile file("vitalair.keystore")
-            storePassword "vitalair123"
-            keyAlias "vitalair"
-            keyPassword "vitalair123"
+            if (file("vitalair.keystore").exists() && System.getenv("KEYSTORE_PASSWORD")) {
+                storeFile file("vitalair.keystore")
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias "vitalair"
+                keyPassword System.getenv("KEYSTORE_PASSWORD")
+            }
         }
     }
     buildTypes {
