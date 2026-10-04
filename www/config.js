@@ -1,6 +1,6 @@
 // Connection details for the shared timesheet (Firebase). Safe to keep in the app.
 window.VA_CONFIG = {
-  // Rohan's admin login. His password is set in Firebase (Authentication > Users). It is never stored here.
+  // Rohan's admin login. His PIN (the Firebase password, 6+ digits) is set in Firebase (Authentication > Users). It is never stored here.
   adminEmail: "rohan.vitalair@gmail.com",
   firebase: {
     apiKey: "AIzaSyBbuT_IbzgN-0Mxgj_SuQZzc59Lq3HRA1M",

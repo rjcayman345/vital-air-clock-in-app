@@ -311,11 +311,11 @@ async function saveFile(filename,data,isB64){
 const adminEmail=()=>String((window.VA_CONFIG&&VA_CONFIG.adminEmail)||"").toLowerCase();
 const isAdminUser=u=>!!u&&!u.isAnonymous&&String(u.email||"").toLowerCase()===adminEmail();
 async function adminLogin(pw){
-  if(!pw){msg="Enter the password.";return render()}
+  if(!pw){msg="Enter your PIN.";return render()}
   if(!window.firebase||!firebase.apps.length){msg="Not connected to the shared timesheet.";return render()}
   busy=true;msg="";render();
   try{await firebase.auth().signInWithEmailAndPassword(adminEmail(),pw);msg=""}
-  catch(e){msg=/network/i.test(e.code||"")?"No signal. Try again when you're online.":"Wrong password."}
+  catch(e){msg=/network/i.test(e.code||"")?"No signal. Try again when you're online.":"Wrong PIN."}
   busy=false;render();
 }
 async function adminLogout(){
@@ -327,7 +327,7 @@ function adminCard(){
   if(!showLogin)return `<div style="text-align:center"><button class="link" data-act="showlogin">Office login</button></div>`;
   return `<div class="card"><h2>Office login</h2>
     <div class="chips"><button class="chip" aria-pressed="true" type="button">Rohan (admin)</button></div>
-    <div class="actions"><input class="pin" style="max-width:none" type="password" autocomplete="current-password" id="pw" placeholder="Password"><button class="btn plain" data-act="adminon" ${busy?"disabled":""}>Sign in</button></div>
+    <div class="actions"><input class="pin" style="max-width:none" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="off" id="pw" placeholder="PIN"><button class="btn plain" data-act="adminon" ${busy?"disabled":""}>Sign in</button></div>
     ${msg?`<div class="note">${esc(msg)}</div>`:""}</div>`;
 }
 

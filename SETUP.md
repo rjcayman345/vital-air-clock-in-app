@@ -7,12 +7,12 @@ Works with no signal too; entries sync when the phone reconnects.
 ## 1. Connect the shared timesheet (Firebase)
 Your Firebase project is already filled in (`www/config.js`). In the Firebase console, finish these once:
 1. **Authentication > Sign-in method:** enable **Anonymous** (techs) and **Email/Password** (Rohan).
-2. **Authentication > Users > Add user:** email `rohan.vitalair@gmail.com`, and a password only Rohan knows.
+2. **Authentication > Users > Add user:** email `rohan.vitalair@gmail.com`, and a **6-digit PIN** as the password (Firebase needs at least 6 characters, so use numbers only, e.g. `482916`).
 3. **Authentication > Settings > User actions:** turn **off** "Enable create (sign-up)" so nobody can make accounts.
 4. **Firestore Database > Rules:** paste all of `firestore.rules` and **Publish**.
 
 ## Admin (Rohan)
-On the Clock tab, tap **Office login**, enter the password, and tap **Sign in**. The **Hours** tab then appears with every
+On the Clock tab, tap **Office login**, enter the PIN, and tap **Sign in**. The **Hours** tab then appears with every
 tech's timesheet, edit/delete on entries, job management, and **PDF timesheets** (a summary page plus one page per tech for
 the selected week or pay period; with a tech selected, just that tech). Techs never see the Hours tab, and the database
 rules stop anyone but Rohan's account from editing or deleting entries.
