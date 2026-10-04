@@ -1,1 +1,1 @@
-{"appId":"com.vitalair.timeclock","appName":"Vital Air Time Clock","webDir":"www","android":{"allowMixedContent":false},adminPin: "1234"}
+{"appId":"com.vitalair.timeclock","appName":"Vital Air Time Clock","webDir":"www","android":{"allowMixedContent":false},"adminPin": "1234"}
