@@ -18,7 +18,15 @@ On your phone, open the repo's **Releases > Latest Android app**, download `vita
 install it (Android will ask you to allow installs from your browser the first time).
 Builds on other branches are under Actions > the run > Artifacts.
 
-## Updating
+## Updating (in-app)
+When a newer build is published, the app shows an **Update available** bar. Tap **Update now**, then **Install**
+on Android's prompt. The first time, Android asks you to allow "Install unknown apps" for this app.
+You can also tap **Check for updates** at the bottom of any screen. Hours are stored online and are never lost.
+
+**One-time reinstall:** the first APK was signed with a throwaway key. Uninstall that one once, then install
+the newest; every update after that installs over the top.
+
+## Updating (editing the code)
 Change anything (a tech name in `www/app.js`, jobs in `www/jobs.js`, the PIN in `www/config.js`), push, and
 install the new APK over the old one. Hours are stored online, so updating the app never loses them.
 

@@ -17,10 +17,15 @@ jobs:
       - run: npm test
       - run: npx cap sync android
       - name: Build debug APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 1.0.${{ github.run_number }}
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
       - name: Name the APK
         run: cp android/app/build/outputs/apk/debug/app-debug.apk vital-air-time-clock.apk
+      - name: Write version file (the app checks this to offer updates)
+        run: echo '{"versionCode":${{ github.run_number }},"versionName":"1.0.${{ github.run_number }}"}' > version.json
       - uses: actions/upload-artifact@v4
         with: { name: vital-air-time-clock-apk, path: vital-air-time-clock.apk }
       # Every build on the default branch publishes a download link you can open on your phone.
@@ -31,5 +36,7 @@ jobs:
           tag_name: latest
           name: Latest Android app
           body: "Open this page on your Android phone, download vital-air-time-clock.apk and install it."
-          files: vital-air-time-clock.apk
+          files: |
+            vital-air-time-clock.apk
+            version.json
           make_latest: true

@@ -4,6 +4,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
+let update=null,updating=false,appVer=null,upMsg="";
 let segs=[],loaded=false,busy=false,store=null,pending=false,online=navigator.onLine;
 let tab=location.hash==="#hours"?"hours":"clock";
 let tech=TECHS.includes(ls.get("va_tech"))?ls.get("va_tech"):null;
@@ -124,10 +125,15 @@ function render(){
   tick();
 }
 function statusBar(){
+  if(update)return `<div class="note headrow"><span><b>Update available</b> (version ${esc(update.versionName)}). Your hours are safe; this only updates the app.</span><button class="btn plain" data-act="doupdate" ${updating?"disabled":""}>${updating?"Downloading…":"Update now"}</button></div>`;
   if(!store||!store.shared)return "";
   if(!online)return `<div class="note">You're offline. Clock-ins are saved on this phone and will sync as soon as you have signal.</div>`;
   if(pending)return `<div class="note">Syncing…</div>`;
   return "";
+}
+function versionFooter(){
+  if(!native())return "";
+  return `<div class="at" style="text-align:center">Version ${esc(appVer?appVer.name:"")} · <button class="link" data-act="checkupdate">Check for updates</button>${upMsg?`<br>${esc(upMsg)}`:""}</div>`;
 }
 function techChips(includeAll){
   const list=includeAll?["All",...TECHS]:TECHS,cur=includeAll?filter:tech;
@@ -187,7 +193,7 @@ function clockView(){
   </div>
   <div class="card"><div class="headrow"><h2>This week</h2><span class="at">${weekLabel(wa,wb)} · hours:minutes</span></div>${dailyTable(week,wa,null,7)}
     ${(()=>{const m=mode;mode="period";const [pa,pb]=range(0);mode=m;const p=paid(segs.filter(s=>s.tech===tech&&s.start>=pa&&s.start<pb));
-      return `<div class="at">Pay period ${weekLabel(pa,pb)}: <b>${hc(p)}</b> of 90:00 regular hours${p>OT_LIMIT?` · <b class="flag">overtime ${hc(p-OT_LIMIT)}</b>`:""}. Breaks are unpaid and not counted.</div>`})()}</div>`:""}`;
+      return `<div class="at">Pay period ${weekLabel(pa,pb)}: <b>${hc(p)}</b> of 90:00 regular hours${p>OT_LIMIT?` · <b class="flag">overtime ${hc(p-OT_LIMIT)}</b>`:""}. Breaks are unpaid and not counted.</div>`})()}</div>`:""}${versionFooter()}`;
 }
 function hoursView(){
   const [a,b]=range(weekOff);
@@ -215,7 +221,7 @@ function hoursView(){
   <div class="card"><div class="headrow"><h2>Entries</h2><span class="at">${admin?"Admin: tap Edit to change a time":"Only Rohan or Jaime can change times"}</span></div><div class="log">${days.length?days.map(d=>{const list=wk.filter(s=>dayKey(s.start)===d);return `<div class="day">${dayName(list[0].start)}</div>`+list.map(s=>segRow(s,true)).join("")}).join(""):`<div class="empty">${loaded?"Nothing to show for these dates.":"Loading…"}</div>`}</div></div>
   ${admin?`<div class="card" id="jobs"><h2>Added jobs</h2><span class="at">Jobs added from the Clock tab. Renaming one also renames it on the hours already logged.</span><div class="log">${EXTRA.length?EXTRA.map(j=>`<div class="row" style="grid-template-columns:1fr auto"><div class="who">${esc(j[0])}<small>${esc(j[1])}</small></div><div><button class="link" data-jobedit="${esc(j[2])}">${jobEdit===j[2]?"Close":"Rename"}</button></div>
     ${jobEdit===j[2]?`<div class="editbox"><label class="field"><span class="label">Job name</span><input type="text" id="job-name" maxlength="120" value="${esc(j[0])}"></label><div class="btns"><button class="btn plain" data-act="jobsave" ${busy?"disabled":""}>Save name</button><button class="btn del" data-act="jobdel" ${busy?"disabled":""}>${jobDel===j[2]?"Tap again to remove":"Remove job"}</button></div></div>`:""}</div>`).join(""):`<div class="empty">No jobs have been added yet. Any job a tech adds will list here so you can fix its name or remove it.</div>`}</div></div>`:""}
-  ${adminCard()}`;
+  ${adminCard()}${versionFooter()}`;
 }
 function csv(){
   const [a,b]=range(weekOff),a2=a;
@@ -248,6 +254,8 @@ $("#view").addEventListener("click",e=>{
   if(d.jobedit){jobEdit=jobEdit===d.jobedit?null:d.jobedit;jobDel=null;return render()}
   if(d.edit){editId=editId===d.edit?null:d.edit;delArm=false;return render()}
   switch(d.act){
+    case "checkupdate":checkUpdate(true);break;
+    case "doupdate":doUpdate();break;
     case "adminon":tryAdmin(($("#pin")||{}).value||"");break;
     case "adminoff":admin=false;ls.set("va_admin","0");editId=null;render();break;
     case "pick":picking=true;render();$("#q")&&$("#q").focus();break;
@@ -308,6 +316,33 @@ function adminCard(){
     ${msg?`<div class="note">${esc(msg)}</div>`:""}</div>`;
 }
 
+/* ---------- in-app updates (Android APK from the GitHub release) ---------- */
+const UPDATE_BASE="https://github.com/rjcayman345/vital-air-clock-in-app/releases/download/latest/";
+const native=()=>!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
+async function checkUpdate(manual){
+  if(!native())return;
+  try{
+    const P=Capacitor.Plugins;
+    if(!appVer){const i=await P.App.getInfo();appVer={code:Number(i.build)||0,name:i.version}}
+    const r=await fetch(UPDATE_BASE+"version.json?t="+Date.now(),{cache:"no-store"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const v=await r.json();
+    update=Number(v.versionCode)>appVer.code?v:null;
+    upMsg=manual?(update?"":"You're on the latest version."):"";
+  }catch(e){if(manual)upMsg="Couldn't check for updates. Check your signal."}
+  render();
+}
+async function doUpdate(){
+  if(!update||updating)return;
+  updating=true;render();
+  try{
+    const r=await Capacitor.Plugins.ApkUpdater.install({url:UPDATE_BASE+"vital-air-time-clock.apk"});
+    if(r&&r.needsPermission)upMsg="Allow “Install unknown apps” for Vital Air Time Clock, go back, and tap Update now again.";
+  }catch(e){upMsg="The update didn't download. Try again, or get it from the Releases page."}
+  updating=false;render();
+}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkUpdate(false)});
+
 /* ---------- boot ---------- */
 window.addEventListener("online",()=>{online=true;render()});
 window.addEventListener("offline",()=>{online=false;render()});
@@ -328,5 +363,6 @@ render();
   else{store=localStore();banner("The shared timesheet isn't set up yet, so hours are saving on this phone only. See SETUP.md to connect it.")}
   const o=tech&&openSeg();if(o)cust=o.cust;
   render();
+  checkUpdate(false);
 })();
 if("serviceWorker" in navigator&&location.protocol.startsWith("http")){navigator.serviceWorker.register("sw.js").catch(()=>{})}
