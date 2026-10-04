@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Vital Air Time Clock</string>
+    <string name="title_activity_main">Vital Air Time Clock</string>
+    <string name="package_name">com.vitalair.timeclock</string>
+    <string name="custom_url_scheme">com.vitalair.timeclock</string>
+</resources>

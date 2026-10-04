@@ -1,0 +1,332 @@
+
+const TECHS=["Nimrod Buro","Deavour Rose","Rohan Dudhnath"];
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+let segs=[],loaded=false,busy=false,store=null,pending=false,online=navigator.onLine;
+let tab=location.hash==="#hours"?"hours":"clock";
+let tech=TECHS.includes(ls.get("va_tech"))?ls.get("va_tech"):null;
+let cust=ls.get("va_cust")?String(ls.get("va_cust")).replace(/GS[Ll]\s*-\s*/g,"VA-"):null,EXTRA=[];
+const NONJOB=[["Shop time","Non-job time"],["Parts pickup","Non-job time"],["Training","Non-job time"]];
+const allCust=()=>NONJOB.concat(CUST,EXTRA);
+const norm=n=>String(n||"").replace(/GS[Ll]\s*-\s*/g,"VA-");
+const OT_LIMIT=90*3600000, PERIOD_ANCHOR=new Date(2026,8,28).getTime();
+const TYPES={travel:"Travel",work:"Working",break:"Break"};
+let picking=false,query="",weekOff=0,filter="All",editId=null,delArm=false,msg="",adding=false,admin=false,mode="week",jobEdit=null,jobDel=null;
+
+/* ---------- time helpers ---------- */
+const durOf=(s,now=Date.now())=>Math.max(0,(s.end??now)-s.start);
+const hm=ms=>{const m=Math.round(ms/60000);return Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m"};
+const hc=ms=>{const m=Math.round(ms/60000);return Math.floor(m/60)+":"+String(m%60).padStart(2,"0")};
+const clock=ms=>{const t=Math.floor(ms/1000),p=n=>String(n).padStart(2,"0");return p(Math.floor(t/3600))+":"+p(Math.floor(t/60)%60)+":"+p(t%60)};
+const tm=ms=>new Date(ms).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+const dayKey=ms=>{const d=new Date(ms);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
+const dayName=ms=>new Date(ms).toLocaleDateString([], {weekday:"long",month:"short",day:"numeric",year:"numeric"});
+const fullDate=ms=>new Date(ms).toLocaleDateString([], {weekday:"long",month:"long",day:"numeric",year:"numeric"});
+const weekLabel=(a,b)=>{const f=ms=>new Date(ms).toLocaleDateString([], {month:"short",day:"numeric"});return f(a)+" – "+f(b-1)+", "+new Date(b-1).getFullYear()};
+function dailyTable(list,a,techs,nd){
+  const today=dayKey(Date.now()),rows=[];
+  const cols=techs?[...techs.map(x=>x.split(" ")[0]),"Total"]:["Travel","Working","Total"];
+  const cells=l=>{if(techs){const v=techs.map(x=>{const s=sum(l.filter(y=>y.tech===x));return s.t+s.w});return [...v,v.reduce((p,c)=>p+c,0)]}const s=sum(l);return [s.t,s.w,s.t+s.w]};
+  for(let i=0;i<nd;i++){const d=new Date(a);d.setDate(d.getDate()+i);const k=dayKey(d.getTime());
+    rows.push(`<tr${k===today?' class="today"':""}><td>${d.toLocaleDateString([], {weekday:"short",month:"short",day:"numeric"})}</td>${cells(list.filter(s=>dayKey(s.start)===k)).map(v=>`<td>${v?hc(v):"–"}</td>`).join("")}</tr>`)}
+  return `<div class="scroll"><table><thead><tr><th>Date</th>${cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody><tfoot><tr><td>${nd>7?"Period total":"Week total"}</td>${cells(list).map(v=>`<td>${hc(v)}</td>`).join("")}</tr></tfoot></table></div>`;
+}
+const toLocalInput=ms=>ms==null?"":new Date(ms-new Date(ms).getTimezoneOffset()*60000).toISOString().slice(0,16);
+function range(off){
+  if(mode==="week")return weekRange(off);
+  const wks=Math.round((weekRange(0)[0]-PERIOD_ANCHOR)/604800000),d=new Date(PERIOD_ANCHOR);
+  d.setDate(d.getDate()+(Math.floor(wks/2)+off)*14);const a=d.getTime();d.setDate(d.getDate()+14);return [a,d.getTime()];
+}
+function weekRange(off){const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7)+off*7);const a=d.getTime();d.setDate(d.getDate()+7);return [a,d.getTime()]}
+const shortCust=n=>n.includes(":")?n.split(":").pop():n;
+function sum(list){let t=0,w=0;for(const s of list){if(s.type==="travel")t+=durOf(s);else if(s.type!=="break")w+=durOf(s)}return {t,w}}
+const paid=list=>{const s=sum(list);return s.t+s.w};
+const openSeg=()=>segs.find(s=>s.tech===tech&&s.end==null);
+
+/* ---------- storage: shared timesheet, or this phone only ---------- */
+function localStore(){
+  const read=()=>{try{return JSON.parse(ls.get("va_punches")||"[]")}catch(e){return []}};
+  const save=()=>ls.set("va_punches",JSON.stringify(segs));
+  segs=read().map(s=>({...s,cust:norm(s.cust)}));loaded=true;
+  try{EXTRA=JSON.parse(ls.get("va_jobs")||"[]")}catch(e){EXTRA=[]}
+  return {shared:false,
+    async addJob(d){EXTRA.push([d.name,"Added by "+(d.by||"office"),"j"+Date.now()]);ls.set("va_jobs",JSON.stringify(EXTRA))},
+    async renameJob(id,name){const j=EXTRA.find(x=>x[2]===id);if(j)j[0]=name;ls.set("va_jobs",JSON.stringify(EXTRA))},
+    async delJob(id){EXTRA=EXTRA.filter(x=>x[2]!==id);ls.set("va_jobs",JSON.stringify(EXTRA))},
+    async add(d){segs.unshift({id:"l"+Date.now()+Math.random().toString(36).slice(2,6),...d});save();render()},
+    async patch(id,f){const s=segs.find(x=>x.id===id);if(s)Object.assign(s,f);save();render()},
+    async del(id){segs=segs.filter(x=>x.id!==id);save();render()}};
+}
+function dbStore(db){
+  const col=db.collection("punches");
+  // Offline-first: a write shows up in the snapshot instantly and syncs when the phone has signal,
+  // so we don't wait on the server's acknowledgement (that would hang with no signal).
+  const fire=p=>{p.catch(e=>{msg=e&&e.code==="permission-denied"?"That wasn't saved: the shared timesheet refused the change. Check the Firebase rules and sign-in setup.":"That wasn't saved. Try again.";render()});return Promise.resolve()};
+  col.orderBy("start","desc").limit(1000).onSnapshot({includeMetadataChanges:true},snap=>{
+    segs=snap.docs.map(d=>{const x=d.data();return {id:d.id,...x,cust:norm(x.cust)}});loaded=true;
+    pending=snap.metadata.hasPendingWrites;
+    render();
+  },()=>{banner("The shared timesheet stopped responding. Check your signal, then reopen the app.")});
+  db.collection("jobs").onSnapshot(snap=>{
+    EXTRA=snap.docs.map(d=>({id:d.id,...d.data()})).filter(j=>j&&typeof j.name==="string").sort((x,y)=>(x.at||0)-(y.at||0)).map(j=>[norm(j.name),"Added by "+(j.by||"office"),j.id]);render();
+  },()=>{});
+  return {shared:true,
+    addJob:d=>fire(db.collection("jobs").doc().set(d)),
+    renameJob:(id,name)=>fire(db.collection("jobs").doc(id).update({name})),
+    delJob:id=>fire(db.collection("jobs").doc(id).delete()),
+    add:d=>fire(col.doc().set(d)),
+    patch:(id,f)=>fire(col.doc(id).update(f)),
+    del:id=>fire(col.doc(id).delete())};
+}
+function banner(t){const b=$("#banner");b.textContent=t;b.hidden=!t}
+async function act(fn){
+  if(busy)return;busy=true;msg="";render();
+  try{await fn()}catch(e){
+    msg=e&&e.code==="invalid_argument"?"That wasn't saved. Your access to this page is view-only, so ask the office to make you a Contributor.":"That wasn't saved. Check your signal and try again.";
+  }
+  busy=false;render();
+}
+
+/* ---------- actions ---------- */
+function start(type){
+  if(!tech||(!cust&&type!=="break"))return;
+  const noteEl=$("#note"),note=noteEl?noteEl.value.trim():"";
+  act(async()=>{
+    const now=Date.now(),o=openSeg();
+    if(o)await store.patch(o.id,{end:now});
+    await store.add({tech,cust:type==="break"&&o?o.cust:cust,type,start:now,end:null,note:type==="break"?"":note});
+  });
+}
+function clockOut(){const o=openSeg();if(o)act(()=>store.patch(o.id,{end:Date.now()}))}
+
+let autoBusy=false;
+async function autoClose(){
+  if(!store||!loaded||autoBusy)return;autoBusy=true;
+  const now=Date.now();
+  for(const s of segs.filter(x=>x.end==null)){
+    const e=new Date(s.start);e.setHours(23,59,0,0);
+    if(now>e.getTime()){try{await store.patch(s.id,{end:Math.max(e.getTime(),s.start+60000),auto:true})}catch(_){}}
+  }
+  autoBusy=false;
+}
+setInterval(autoClose,60000);setTimeout(autoClose,4000);
+/* ---------- views ---------- */
+function render(){
+  $("#wrap").classList.toggle("wide",tab==="hours");
+  $("#tab-clock").setAttribute("aria-selected",tab==="clock");
+  $("#tab-hours").setAttribute("aria-selected",tab==="hours");
+  const keep=document.activeElement&&document.activeElement.id==="q";
+  $("#view").innerHTML=statusBar()+(tab==="clock"?clockView():hoursView());
+  $("#view").style.cssText="display:flex;flex-direction:column;gap:16px";
+  if(keep&&$("#q")){const q=$("#q");q.focus();q.setSelectionRange(q.value.length,q.value.length)}
+  tick();
+}
+function statusBar(){
+  if(!store||!store.shared)return "";
+  if(!online)return `<div class="note">You're offline. Clock-ins are saved on this phone and will sync as soon as you have signal.</div>`;
+  if(pending)return `<div class="note">Syncing…</div>`;
+  return "";
+}
+function techChips(includeAll){
+  const list=includeAll?["All",...TECHS]:TECHS,cur=includeAll?filter:tech;
+  return `<div class="chips">${list.map(t=>`<button class="chip" data-tech="${esc(t)}" aria-pressed="${t===cur}">${esc(t)}</button>`).join("")}</div>`;
+}
+function custPicker(){
+  const c=allCust().find(x=>x[0]===cust)||(cust?[cust,""]:null);
+  if(c&&!picking)return `<div class="picked"><div><b>${esc(shortCust(c[0]))}</b><small>${esc([c[0].includes(":")?c[0].split(":")[0]:"",c[1]].filter(Boolean).join(" · "))}</small></div><button class="link" data-act="pick">Change</button></div>`;
+  const words=query.toLowerCase().split(/\s+/).filter(Boolean);
+  const all=allCust(),qn=query.trim().replace(/\s+/g," "),exact=all.some(x=>x[0].toLowerCase()===qn.toLowerCase());
+  const hits=all.filter(x=>{const h=(x[0]+" "+x[1]).toLowerCase();return words.every(w=>h.includes(w))});
+  return `<input type="search" id="q" placeholder="Search ${all.length} jobs, or type a new one" value="${esc(query)}" autocomplete="off">
+  <div class="results">${hits.length?hits.slice(0,40).map(x=>`<button data-cust="${esc(x[0])}"><span>${esc(shortCust(x[0]))}</span>${x[1]||x[0].includes(":")?`<small>${esc([x[0].includes(":")?x[0].split(":")[0]:"",x[1]].filter(Boolean).join(" · "))}</small>`:""}</button>`).join("")+(hits.length>40?`<div class="none">${hits.length-40} more. Keep typing to narrow it down.</div>`:""):`<div class="none">No job matches “${esc(query)}”.</div>`}</div>
+  ${qn.length>=3&&!exact?`<button class="btn plain" data-act="addjob" ${busy?"disabled":""}>+ Add “${esc(qn)}” as a new job</button>`:""}`;
+}
+function segRow(s,showTech){
+  const editing=admin&&editId===s.id;
+  return `<div class="row"><span class="tag ${s.type}">${TYPES[s.type]||"Working"}</span>
+  <div class="who">${esc(shortCust(s.cust))}<small>${showTech?esc(s.tech)+" · ":""}${tm(s.start)} – ${s.end==null?"now":tm(s.end)}${s.note?" · "+esc(s.note):""}${s.edited?" · edited":""}${s.type==="break"?" · unpaid":""}${s.auto?` · <b class="flag">auto clock-out, needs review</b>`:""}</small></div>
+  <div class="dur"><span ${s.end==null?`data-live="${s.start}"`:""}>${hm(durOf(s))}</span>${admin?`<br><button class="link" data-edit="${esc(s.id)}">${editing?"Close":"Edit"}</button>`:""}</div>
+  ${editing?`<div class="editbox">
+    <label class="field"><span class="label">Started</span><input type="datetime-local" id="e-start" value="${toLocalInput(s.start)}"></label>
+    <label class="field"><span class="label">Ended (blank = still on)</span><input type="datetime-local" id="e-end" value="${toLocalInput(s.end)}"></label>
+    <label class="field"><span class="label">Type</span><select id="e-type"><option value="travel"${s.type==="travel"?" selected":""}>Travel</option><option value="work"${s.type==="work"?" selected":""}>Working</option><option value="break"${s.type==="break"?" selected":""}>Break (unpaid)</option></select></label>
+    <div class="btns"><button class="btn plain" data-act="save" ${busy?"disabled":""}>Save changes</button><button class="btn del" data-act="del" ${busy?"disabled":""}>${delArm?"Tap again to delete":"Delete entry"}</button></div>
+  </div>`:""}</div>`;
+}
+function clockView(){
+  const o=tech?openSeg():null;
+  const today=tech?segs.filter(s=>s.tech===tech&&dayKey(s.start)===dayKey(Date.now())).sort((a,b)=>b.start-a.start):[];
+  const tot=sum(today);
+  const [wa,wb]=weekRange(0);
+  const week=tech?segs.filter(s=>s.tech===tech&&s.start>=wa&&s.start<wb):[];
+  const stale=o&&Date.now()-o.start>14*3600000;
+  return `<div class="field"><span class="label">Technician</span>${techChips(false)}</div>
+  <div class="card">
+    <div class="date">${fullDate(Date.now())}</div>
+    <span class="status ${o?o.type:"off"}">${o?(o.type==="travel"?"Travelling":o.type==="break"?"On break (unpaid)":"Working"):"Off the clock"}</span>
+    <div class="timer" id="timer" ${o?`data-start="${o.start}"`:""}>${o?clock(durOf(o)):"00:00:00"}</div>
+    <div class="at">${!tech?"Tap your name to begin.":o?`at <b>${esc(shortCust(o.cust))}</b> since ${tm(o.start)}`:!loaded?"Loading your hours…":"Pick the job, then start travel or start working."}</div>
+    ${stale?`<div class="note">You've been clocked in since ${dayName(o.start)}, ${tm(o.start)}. If you forgot to clock out, clock out now and ask Rohan or Jaime to correct the end time.</div>`:""}
+    ${tech?`<div class="field"><span class="label">${o?"Next job":"Job"}</span>${custPicker()}
+      ${adding?`<div class="editbox"><label class="field"><span class="label">New job name</span><input type="text" id="newjob" maxlength="120" placeholder="e.g. GSL - 291 / Jane Smith - OLEA 204"></label><div class="btns"><button class="btn work" data-act="addjob" ${busy?"disabled":""}>Save new job</button><button class="btn plain" data-act="canceljob">Cancel</button></div></div>`:`<button class="btn plain" data-act="newjob">+ Add a new job</button>`}</div>
+    <label class="field"><span class="label">Note (optional)</span><input type="text" id="note" maxlength="140" placeholder="e.g. compressor change, callback"></label>
+    <div class="actions">
+      <button class="btn travel" data-act="travel" ${busy||!cust||!loaded||(o&&o.type==="travel"&&o.cust===cust)?"disabled":""}>Start travel</button>
+      <button class="btn work" data-act="work" ${busy||!cust||!loaded||(o&&o.type==="work"&&o.cust===cust)?"disabled":""}>Start working</button>
+      ${o?`<button class="btn plain wide2" data-act="break" ${busy||o.type==="break"?"disabled":""}>${o.type==="break"?"On break. Tap Start travel or Start working to resume":"Start break (unpaid)"}</button>`:""}
+      ${o?`<button class="btn out" data-act="out" ${busy?"disabled":""}>Clock out</button>`:""}
+    </div>`:""}
+    ${msg?`<div class="note">${esc(msg)}</div>`:""}
+  </div>
+  ${tech?`<div class="card"><div class="headrow"><h2>Today</h2><span class="at">${new Date().toLocaleDateString([], {weekday:"short",month:"short",day:"numeric",year:"numeric"})}</span></div>
+    <div class="totals"><div><span class="label">Travel</span><b>${hm(tot.t)}</b></div><div><span class="label">Working</span><b>${hm(tot.w)}</b></div><div><span class="label">Total</span><b>${hm(tot.t+tot.w)}</b></div></div>
+    <div class="log">${today.length?today.map(s=>segRow(s,false)).join(""):`<div class="empty">${loaded?"No time logged today. Your travel and working time will list here as you clock it.":"Loading…"}</div>`}</div>
+    <span class="at">${admin?"You're an admin, so you can change or delete any entry with Edit.":"Need a time corrected? Ask Rohan or Jaime. Only they can change entries."}</span>
+  </div>
+  <div class="card"><div class="headrow"><h2>This week</h2><span class="at">${weekLabel(wa,wb)} · hours:minutes</span></div>${dailyTable(week,wa,null,7)}
+    ${(()=>{const m=mode;mode="period";const [pa,pb]=range(0);mode=m;const p=paid(segs.filter(s=>s.tech===tech&&s.start>=pa&&s.start<pb));
+      return `<div class="at">Pay period ${weekLabel(pa,pb)}: <b>${hc(p)}</b> of 90:00 regular hours${p>OT_LIMIT?` · <b class="flag">overtime ${hc(p-OT_LIMIT)}</b>`:""}. Breaks are unpaid and not counted.</div>`})()}</div>`:""}`;
+}
+function hoursView(){
+  const [a,b]=range(weekOff);
+  const wk=segs.filter(s=>s.start>=a&&s.start<b&&(filter==="All"||s.tech===filter)).sort((x,y)=>x.start-y.start);
+  const fmt=ms=>new Date(ms).toLocaleDateString([], {month:"short",day:"numeric"});
+  const byTech=TECHS.filter(t=>filter==="All"||t===filter).map(t=>[t,sum(wk.filter(s=>s.tech===t))]);
+  const custs=[...new Set(wk.map(s=>s.cust))].map(c=>[c,sum(wk.filter(s=>s.cust===c))]).sort((x,y)=>(y[1].t+y[1].w)-(x[1].t+x[1].w));
+  const all=sum(wk);
+  const tr=(n,v)=>`<tr><td>${esc(n)}</td><td>${hc(v.t)}</td><td>${hc(v.w)}</td><td>${hc(v.t+v.w)}</td></tr>`;
+  const head=`<thead><tr><th></th><th>Travel</th><th>Working</th><th>Total</th></tr></thead>`;
+  const days=[...new Set(wk.map(s=>dayKey(s.start)))];
+  return `<div class="card">
+    <div class="weeknav"><button class="btn plain" data-act="prev">‹ Earlier</button><span class="mid">${weekLabel(a,b)}${weekOff===0?(mode==="week"?" · this week":" · current pay period"):""}</span><button class="btn plain" data-act="next" ${weekOff>=0?"disabled":""}>Later ›</button></div>
+    <div class="chips"><button class="chip" data-mode="week" aria-pressed="${mode==="week"}">Week</button><button class="chip" data-mode="period" aria-pressed="${mode==="period"}">Pay period (2 weeks)</button></div>
+    ${techChips(true)}
+    ${mode==="week"?`<div class="scroll"><table>${head}<tbody>${byTech.map(x=>tr(x[0],x[1])).join("")}</tbody>${filter==="All"?`<tfoot>${tr("All technicians",all)}</tfoot>`:""}</table></div>`
+    :`<div class="scroll"><table><thead><tr><th></th><th>Paid</th><th>Regular</th><th>Overtime</th></tr></thead><tbody>${byTech.map(x=>{const p=x[1].t+x[1].w,ot=Math.max(0,p-OT_LIMIT);return `<tr><td>${esc(x[0])}</td><td>${hc(p)}</td><td>${hc(p-ot)}</td><td>${ot?`<b class="flag">${hc(ot)}</b>`:"0:00"}</td></tr>`}).join("")}</tbody></table></div>
+    <span class="at">Overtime is paid time over 90:00 in the two-week pay period. Travel and working time both count; breaks don't.</span>`}
+    <div class="headrow"><span class="at">${wk.length} ${wk.length===1?"entry":"entries"} in this ${mode==="week"?"week":"pay period"}. Tables show hours:minutes and count time still on the clock.</span>${true?`<button class="btn plain" data-act="csv" ${wk.length?"":"disabled"}>Download ${mode==="week"?"week":"pay period"} as CSV</button>`:""}</div>
+    ${msg?`<div class="note">${esc(msg)}</div>`:""}
+  </div>
+  <div class="card"><div class="headrow"><h2>Daily hours</h2><span class="at">${filter==="All"?"Total per technician, each day (hours:minutes)":esc(filter)}</span></div>${dailyTable(wk,a,filter==="All"?TECHS:null,mode==="week"?7:14)}</div>
+  ${admin&&segs.some(s=>s.auto)?`<div class="card" id="review"><h2>Needs review</h2><span class="at">These were still running at the end of the day, so they were clocked out automatically at 11:59 PM. Tap Edit to set the real end time.</span><div class="log">${segs.filter(s=>s.auto).map(s=>`<div class="day">${dayName(s.start)}</div>`+segRow(s,true)).join("")}</div></div>`:""}
+  <div class="card"><h2>By customer</h2>${custs.length?`<div class="scroll"><table>${head}<tbody>${custs.map(x=>tr(shortCust(x[0]),x[1])).join("")}</tbody></table></div>`:`<div class="empty">${loaded?"No hours logged this week. Each job the techs clock into will show here with its travel and working time.":"Loading…"}</div>`}</div>
+  <div class="card"><div class="headrow"><h2>Entries</h2><span class="at">${admin?"Admin: tap Edit to change a time":"Only Rohan or Jaime can change times"}</span></div><div class="log">${days.length?days.map(d=>{const list=wk.filter(s=>dayKey(s.start)===d);return `<div class="day">${dayName(list[0].start)}</div>`+list.map(s=>segRow(s,true)).join("")}).join(""):`<div class="empty">${loaded?"Nothing to show for these dates.":"Loading…"}</div>`}</div></div>
+  ${admin?`<div class="card" id="jobs"><h2>Added jobs</h2><span class="at">Jobs added from the Clock tab. Renaming one also renames it on the hours already logged.</span><div class="log">${EXTRA.length?EXTRA.map(j=>`<div class="row" style="grid-template-columns:1fr auto"><div class="who">${esc(j[0])}<small>${esc(j[1])}</small></div><div><button class="link" data-jobedit="${esc(j[2])}">${jobEdit===j[2]?"Close":"Rename"}</button></div>
+    ${jobEdit===j[2]?`<div class="editbox"><label class="field"><span class="label">Job name</span><input type="text" id="job-name" maxlength="120" value="${esc(j[0])}"></label><div class="btns"><button class="btn plain" data-act="jobsave" ${busy?"disabled":""}>Save name</button><button class="btn del" data-act="jobdel" ${busy?"disabled":""}>${jobDel===j[2]?"Tap again to remove":"Remove job"}</button></div></div>`:""}</div>`).join(""):`<div class="empty">No jobs have been added yet. Any job a tech adds will list here so you can fix its name or remove it.</div>`}</div></div>`:""}
+  ${adminCard()}`;
+}
+function csv(){
+  const [a,b]=range(weekOff),a2=a;
+  const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+  const rows=segs.filter(s=>s.start>=a&&s.start<b&&(filter==="All"||s.tech===filter)).sort((x,y)=>x.start-y.start)
+    .map(s=>[dayKey(s.start),s.tech,s.cust,s.type==="break"?"Break (unpaid)":TYPES[s.type]||"Working",tm(s.start),s.end==null?"":tm(s.end),(durOf(s)/3600000).toFixed(2),s.note||"",s.auto?"Auto clock-out - needs review":s.edited?"Edited":""].map(q).join(","));
+  const data="Date,Technician,Customer,Type,Start,End,Hours,Note,Flag\r\n"+rows.join("\r\n");
+  saveFile("vital-air-hours-"+dayKey(a2)+".csv",data);
+}
+function tick(){
+  const now=Date.now(),t=$("#timer");
+  if(t&&t.dataset.start)t.textContent=clock(now-Number(t.dataset.start));
+  document.querySelectorAll("[data-live]").forEach(e=>{e.textContent=hm(now-Number(e.dataset.live))});
+}
+setInterval(tick,1000);
+
+/* ---------- events ---------- */
+function setTab(t){tab=t;editId=null;msg="";try{history.replaceState(null,"",t==="hours"?"#hours":"#clock")}catch(e){}render()}
+$("#view").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="pin")tryAdmin(e.target.value)});
+$("#tab-clock").onclick=()=>setTab("clock");
+$("#tab-hours").onclick=()=>setTab("hours");
+$("#view").addEventListener("input",e=>{if(e.target.id==="q"){query=e.target.value;render()}});
+$("#view").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  const d=b.dataset;
+  if(d.tech){if(tab==="hours")filter=d.tech;else{tech=d.tech;ls.set("va_tech",tech);const o=openSeg();if(o){cust=o.cust}}editId=null;return render()}
+  if(d.cust){cust=d.cust;ls.set("va_cust",cust);picking=false;query="";return render()}
+  if((d.edit||d.jobedit||["save","del","cleardemo","jobsave","jobdel"].includes(d.act))&&!admin)return;
+  if(d.mode){mode=d.mode;weekOff=0;editId=null;return render()}
+  if(d.jobedit){jobEdit=jobEdit===d.jobedit?null:d.jobedit;jobDel=null;return render()}
+  if(d.edit){editId=editId===d.edit?null:d.edit;delArm=false;return render()}
+  switch(d.act){
+    case "adminon":tryAdmin(($("#pin")||{}).value||"");break;
+    case "adminoff":admin=false;ls.set("va_admin","0");editId=null;render();break;
+    case "pick":picking=true;render();$("#q")&&$("#q").focus();break;
+    case "travel":start("travel");break;
+    case "work":start("work");break;
+    case "break":start("break");break;
+    case "out":clockOut();break;
+    case "prev":weekOff--;editId=null;render();break;
+    case "next":weekOff++;editId=null;render();break;
+    case "csv":csv();break;
+    case "jobsave":{const id=jobEdit,j=EXTRA.find(x=>x[2]===id),name=$("#job-name").value.trim().replace(/\s+/g," ").slice(0,120);
+      if(!j||name.length<3){msg="The job name needs at least 3 letters.";render();break}
+      const old=j[0],ids=segs.filter(s=>s.cust===old).map(s=>s.id);
+      act(async()=>{await store.renameJob(id,name);for(const sid of ids)await store.patch(sid,{cust:name});if(cust===old){cust=name;ls.set("va_cust",cust)}jobEdit=null})}break;
+    case "jobdel":{if(jobDel!==jobEdit){jobDel=jobEdit;render();break}const id=jobEdit;act(async()=>{await store.delJob(id);jobEdit=null;jobDel=null})}break;
+    case "newjob":adding=true;render();$("#newjob")&&$("#newjob").focus();break;
+    case "canceljob":adding=false;render();break;
+    case "addjob":{const name=($("#newjob")&&adding?$("#newjob").value:query).trim().replace(/\s+/g," ").slice(0,120);if(name.length<3){msg="Type the new job's name first (at least 3 letters).";render();break}
+      if(allCust().some(x=>x[0].toLowerCase()===name.toLowerCase())){cust=allCust().find(x=>x[0].toLowerCase()===name.toLowerCase())[0];ls.set("va_cust",cust);adding=false;picking=false;query="";render();break}
+      act(async()=>{await store.addJob({name,by:tech||"",at:Date.now()});cust=name;ls.set("va_cust",cust);picking=false;query="";adding=false})}break;
+    case "cleardemo":{const ids=segs.filter(s=>s.demo).map(s=>s.id);act(async()=>{for(const id of ids)await store.del(id)})}break;
+    case "save":{
+      const s=Date.parse($("#e-start").value),ev=$("#e-end").value,en=ev?Date.parse(ev):null,ty=$("#e-type").value,id=editId;
+      if(!s||(en!=null&&en<=s)){msg="The end time has to be after the start time.";return render()}
+      act(async()=>{await store.patch(id,{start:s,end:en,type:ty,edited:true,editedAt:Date.now(),auto:false});editId=null});break}
+    case "del":
+      if(!delArm){delArm=true;return render()}
+      {const id=editId;act(async()=>{await store.del(id);editId=null;delArm=false})}break;
+  }
+});
+
+/* ---------- files (CSV export) ---------- */
+async function saveFile(filename,data){
+  const cap=window.Capacitor,P=cap&&cap.Plugins;
+  try{
+    if(cap&&cap.isNativePlatform&&cap.isNativePlatform()&&P&&P.Filesystem&&P.Share){
+      const r=await P.Filesystem.writeFile({path:filename,data,directory:"CACHE",encoding:"utf8"});
+      await P.Share.share({title:filename,url:r.uri,dialogTitle:"Save or send hours"});
+      return;
+    }
+    const url=URL.createObjectURL(new Blob([data],{type:"text/csv"})),a=document.createElement("a");
+    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+  }catch(e){if(!/cancel/i.test(String(e&&e.message||e))){msg="The download didn't work on this device.";render()}}
+}
+
+/* ---------- office (admin) mode ---------- */
+// A shared PIN keeps techs from editing time by accident. It lives in config.js inside the app,
+// so it is a speed bump, not real security.
+function tryAdmin(pin){
+  const want=String((window.VA_CONFIG&&VA_CONFIG.adminPin)||"");
+  if(want&&pin===want){admin=true;ls.set("va_admin","1");msg="";}else{msg="That PIN isn't right."}
+  render();
+}
+function adminCard(){
+  if(admin)return `<div class="card"><h2>Office mode</h2><span class="at">You can edit and delete entries and manage added jobs.</span><div class="btns"><button class="btn plain" data-act="adminoff">Leave office mode</button></div></div>`;
+  return `<div class="card"><h2>Office login</h2><span class="at">Enter the office PIN to correct times or manage jobs.</span>
+    <div class="actions"><input class="pin" type="password" inputmode="numeric" autocomplete="off" id="pin" placeholder="PIN"><button class="btn plain" data-act="adminon">Unlock</button></div>
+    ${msg?`<div class="note">${esc(msg)}</div>`:""}</div>`;
+}
+
+/* ---------- boot ---------- */
+window.addEventListener("online",()=>{online=true;render()});
+window.addEventListener("offline",()=>{online=false;render()});
+if(ls.get("va_admin")==="1")admin=true;
+render();
+(async()=>{
+  const cfg=window.VA_CONFIG||{};
+  let db=null;
+  try{
+    if(window.firebase&&cfg.firebase&&cfg.firebase.apiKey&&!/PASTE/i.test(cfg.firebase.apiKey)){
+      firebase.initializeApp(cfg.firebase);
+      try{await firebase.auth().signInAnonymously()}catch(e){console.warn("anonymous sign-in failed",e);banner("Sign-in to the shared timesheet failed. Turn on Anonymous sign-in in Firebase (Authentication ▸ Sign-in method).")}
+      db=firebase.firestore();
+      try{await db.enablePersistence({synchronizeTabs:true})}catch(e){}
+    }
+  }catch(e){console.warn(e)}
+  if(db)store=dbStore(db);
+  else{store=localStore();banner("The shared timesheet isn't set up yet, so hours are saving on this phone only. See SETUP.md to connect it.")}
+  const o=tech&&openSeg();if(o)cust=o.cust;
+  render();
+})();
+if("serviceWorker" in navigator&&location.protocol.startsWith("http")){navigator.serviceWorker.register("sw.js").catch(()=>{})}

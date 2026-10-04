@@ -1,0 +1,34 @@
+{
+  "name": "vital-air-time-clock",
+  "version": "1.0.0",
+  "description": "Vital Air real-time time clock (Android app)",
+  "main": "",
+  "scripts": {
+    "sync": "cap sync android",
+    "test": "node --check www/app.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rjcayman345/vital-air-clock-in-app.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rjcayman345/vital-air-clock-in-app/issues"
+  },
+  "homepage": "https://github.com/rjcayman345/vital-air-clock-in-app#readme",
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.4",
+    "@capacitor/share": "^8.0.3",
+    "firebase": "^12.19.0"
+  },
+  "private": true,
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "sharp": "^0.35.5"
+  }
+}

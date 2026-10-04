@@ -1,0 +1,35 @@
+name: Build Android APK
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm ci
+      - run: npm test
+      - run: npx cap sync android
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Name the APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk vital-air-time-clock.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: vital-air-time-clock-apk, path: vital-air-time-clock.apk }
+      # Every build on the default branch publishes a download link you can open on your phone.
+      - name: Publish release
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Android app
+          body: "Open this page on your Android phone, download vital-air-time-clock.apk and install it."
+          files: vital-air-time-clock.apk
+          make_latest: true
