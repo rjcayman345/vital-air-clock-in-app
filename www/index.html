@@ -16,13 +16,15 @@
     <div class="plate"><img alt="Vital Air — Air Conditioning, Geothermal Experts" src="logo.jpg"></div>
     <div class="tabs" role="tablist">
       <button role="tab" id="tab-clock" aria-selected="true">Clock</button>
-      <button role="tab" id="tab-hours" aria-selected="false">Hours</button>
+      <button role="tab" id="tab-hours" aria-selected="false" hidden>Hours</button>
     </div>
   </div>
   <div id="banner" class="note" hidden></div>
   <main id="view"></main>
 </div>
 <script src="config.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/jspdf.plugin.autotable.min.js"></script>
 <script src="vendor/firebase-app-compat.js"></script>
 <script src="vendor/firebase-auth-compat.js"></script>
 <script src="vendor/firebase-firestore-compat.js"></script>

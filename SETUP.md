@@ -4,13 +4,18 @@ Same clock as the Claude page (Clock / Hours tabs, travel / working / break, wee
 CSV export), packaged as an Android app that syncs live between every phone through Firebase.
 Works with no signal too; entries sync when the phone reconnects.
 
-## 1. Create the shared timesheet (about 5 minutes, free)
-1. Go to <https://console.firebase.google.com> and **Add project** (name it e.g. `vital-air-timeclock`, skip Analytics).
-2. **Build > Authentication > Get started > Sign-in method > Anonymous > Enable.**
-3. **Build > Firestore Database > Create database** (production mode, any region near you).
-4. In Firestore open the **Rules** tab, paste the contents of `firestore.rules`, then **Publish**.
-5. **Project settings (gear) > Your apps > Web (`</>`)**, register an app, and copy the `firebaseConfig` values.
-6. Paste them into `www/config.js` and change `adminPin` to your own office PIN. Commit and push.
+## 1. Connect the shared timesheet (Firebase)
+Your Firebase project is already filled in (`www/config.js`). In the Firebase console, finish these once:
+1. **Authentication > Sign-in method:** enable **Anonymous** (techs) and **Email/Password** (Rohan).
+2. **Authentication > Users > Add user:** email `rohan.vitalair@gmail.com`, and a password only Rohan knows.
+3. **Authentication > Settings > User actions:** turn **off** "Enable create (sign-up)" so nobody can make accounts.
+4. **Firestore Database > Rules:** paste all of `firestore.rules` and **Publish**.
+
+## Admin (Rohan)
+On the Clock tab, tap **Office login**, enter the password, and tap **Sign in**. The **Hours** tab then appears with every
+tech's timesheet, edit/delete on entries, job management, and **PDF timesheets** (a summary page plus one page per tech for
+the selected week or pay period; with a tech selected, just that tech). Techs never see the Hours tab, and the database
+rules stop anyone but Rohan's account from editing or deleting entries.
 
 ## 2. Get the APK
 Every push to the default branch builds the app on GitHub (Actions tab, "Build Android APK").
@@ -31,6 +36,5 @@ Change anything (a tech name in `www/app.js`, jobs in `www/jobs.js`, the PIN in 
 install the new APK over the old one. Hours are stored online, so updating the app never loses them.
 
 ## Notes
-- The office PIN only hides the edit buttons; it is inside the app file, so treat it as a speed bump.
 - Data: collections `punches` and `jobs` in Firestore. You can view or export them in the Firebase console.
 - Local preview: `npx serve www` (or open `www/index.html`).

@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
-let update=null,updating=false,appVer=null,upMsg="";
+let showLogin=false,update=null,updating=false,appVer=null,upMsg="";
 let segs=[],loaded=false,busy=false,store=null,pending=false,online=navigator.onLine;
 let tab=location.hash==="#hours"?"hours":"clock";
 let tech=TECHS.includes(ls.get("va_tech"))?ls.get("va_tech"):null;
@@ -115,6 +115,8 @@ async function autoClose(){
 setInterval(autoClose,60000);setTimeout(autoClose,4000);
 /* ---------- views ---------- */
 function render(){
+  if(tab==="hours"&&!admin)tab="clock";
+  $("#tab-hours").hidden=!admin;
   $("#wrap").classList.toggle("wide",tab==="hours");
   $("#tab-clock").setAttribute("aria-selected",tab==="clock");
   $("#tab-hours").setAttribute("aria-selected",tab==="hours");
@@ -193,7 +195,8 @@ function clockView(){
   </div>
   <div class="card"><div class="headrow"><h2>This week</h2><span class="at">${weekLabel(wa,wb)} · hours:minutes</span></div>${dailyTable(week,wa,null,7)}
     ${(()=>{const m=mode;mode="period";const [pa,pb]=range(0);mode=m;const p=paid(segs.filter(s=>s.tech===tech&&s.start>=pa&&s.start<pb));
-      return `<div class="at">Pay period ${weekLabel(pa,pb)}: <b>${hc(p)}</b> of 90:00 regular hours${p>OT_LIMIT?` · <b class="flag">overtime ${hc(p-OT_LIMIT)}</b>`:""}. Breaks are unpaid and not counted.</div>`})()}</div>`:""}${versionFooter()}`;
+      return `<div class="at">Pay period ${weekLabel(pa,pb)}: <b>${hc(p)}</b> of 90:00 regular hours${p>OT_LIMIT?` · <b class="flag">overtime ${hc(p-OT_LIMIT)}</b>`:""}. Breaks are unpaid and not counted.</div>`})()}</div>`:""}
+  ${adminCard()}${versionFooter()}`;
 }
 function hoursView(){
   const [a,b]=range(weekOff);
@@ -212,7 +215,7 @@ function hoursView(){
     ${mode==="week"?`<div class="scroll"><table>${head}<tbody>${byTech.map(x=>tr(x[0],x[1])).join("")}</tbody>${filter==="All"?`<tfoot>${tr("All technicians",all)}</tfoot>`:""}</table></div>`
     :`<div class="scroll"><table><thead><tr><th></th><th>Paid</th><th>Regular</th><th>Overtime</th></tr></thead><tbody>${byTech.map(x=>{const p=x[1].t+x[1].w,ot=Math.max(0,p-OT_LIMIT);return `<tr><td>${esc(x[0])}</td><td>${hc(p)}</td><td>${hc(p-ot)}</td><td>${ot?`<b class="flag">${hc(ot)}</b>`:"0:00"}</td></tr>`}).join("")}</tbody></table></div>
     <span class="at">Overtime is paid time over 90:00 in the two-week pay period. Travel and working time both count; breaks don't.</span>`}
-    <div class="headrow"><span class="at">${wk.length} ${wk.length===1?"entry":"entries"} in this ${mode==="week"?"week":"pay period"}. Tables show hours:minutes and count time still on the clock.</span>${true?`<button class="btn plain" data-act="csv" ${wk.length?"":"disabled"}>Download ${mode==="week"?"week":"pay period"} as CSV</button>`:""}</div>
+    <div class="headrow"><span class="at">${wk.length} ${wk.length===1?"entry":"entries"} in this ${mode==="week"?"week":"pay period"}. Tables show hours:minutes and count time still on the clock.</span>${true?`<button class="btn plain" data-act="pdf">PDF timesheets${filter==="All"?" (all techs)":""}</button><button class="btn plain" data-act="csv" ${wk.length?"":"disabled"}>Download ${mode==="week"?"week":"pay period"} as CSV</button>`:""}</div>
     ${msg?`<div class="note">${esc(msg)}</div>`:""}
   </div>
   <div class="card"><div class="headrow"><h2>Daily hours</h2><span class="at">${filter==="All"?"Total per technician, each day (hours:minutes)":esc(filter)}</span></div>${dailyTable(wk,a,filter==="All"?TECHS:null,mode==="week"?7:14)}</div>
@@ -240,7 +243,7 @@ setInterval(tick,1000);
 
 /* ---------- events ---------- */
 function setTab(t){tab=t;editId=null;msg="";try{history.replaceState(null,"",t==="hours"?"#hours":"#clock")}catch(e){}render()}
-$("#view").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="pin")tryAdmin(e.target.value)});
+$("#view").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="pw")adminLogin(e.target.value)});
 $("#tab-clock").onclick=()=>setTab("clock");
 $("#tab-hours").onclick=()=>setTab("hours");
 $("#view").addEventListener("input",e=>{if(e.target.id==="q"){query=e.target.value;render()}});
@@ -256,8 +259,10 @@ $("#view").addEventListener("click",e=>{
   switch(d.act){
     case "checkupdate":checkUpdate(true);break;
     case "doupdate":doUpdate();break;
-    case "adminon":tryAdmin(($("#pin")||{}).value||"");break;
-    case "adminoff":admin=false;ls.set("va_admin","0");editId=null;render();break;
+    case "adminon":adminLogin(($("#pw")||{}).value||"");break;
+    case "showlogin":showLogin=true;msg="";render();break;
+    case "pdf":pdfTimesheets();break;
+    case "adminoff":adminLogout();break;
     case "pick":picking=true;render();$("#q")&&$("#q").focus();break;
     case "travel":start("travel");break;
     case "work":start("work");break;
@@ -288,32 +293,77 @@ $("#view").addEventListener("click",e=>{
 });
 
 /* ---------- files (CSV export) ---------- */
-async function saveFile(filename,data){
+async function saveFile(filename,data,isB64){
   const cap=window.Capacitor,P=cap&&cap.Plugins;
   try{
     if(cap&&cap.isNativePlatform&&cap.isNativePlatform()&&P&&P.Filesystem&&P.Share){
-      const r=await P.Filesystem.writeFile({path:filename,data,directory:"CACHE",encoding:"utf8"});
+      const r=await P.Filesystem.writeFile(isB64?{path:filename,data,directory:"CACHE"}:{path:filename,data,directory:"CACHE",encoding:"utf8"});
       await P.Share.share({title:filename,url:r.uri,dialogTitle:"Save or send hours"});
       return;
     }
-    const url=URL.createObjectURL(new Blob([data],{type:"text/csv"})),a=document.createElement("a");
+    const blob=isB64?new Blob([Uint8Array.from(atob(data),c=>c.charCodeAt(0))],{type:"application/pdf"}):new Blob([data],{type:"text/csv"}),url=URL.createObjectURL(blob),a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
   }catch(e){if(!/cancel/i.test(String(e&&e.message||e))){msg="The download didn't work on this device.";render()}}
 }
 
-/* ---------- office (admin) mode ---------- */
-// A shared PIN keeps techs from editing time by accident. It lives in config.js inside the app,
-// so it is a speed bump, not real security.
-function tryAdmin(pin){
-  const want=String((window.VA_CONFIG&&VA_CONFIG.adminPin)||"");
-  if(want&&pin===want){admin=true;ls.set("va_admin","1");msg="";}else{msg="That PIN isn't right."}
-  render();
+/* ---------- office (admin) mode: Rohan signs in with a password ---------- */
+// Real protection is in firestore.rules: only the admin account can edit/delete entries.
+const adminEmail=()=>String((window.VA_CONFIG&&VA_CONFIG.adminEmail)||"").toLowerCase();
+const isAdminUser=u=>!!u&&!u.isAnonymous&&String(u.email||"").toLowerCase()===adminEmail();
+async function adminLogin(pw){
+  if(!pw){msg="Enter the password.";return render()}
+  if(!window.firebase||!firebase.apps.length){msg="Not connected to the shared timesheet.";return render()}
+  busy=true;msg="";render();
+  try{await firebase.auth().signInWithEmailAndPassword(adminEmail(),pw);msg=""}
+  catch(e){msg=/network/i.test(e.code||"")?"No signal. Try again when you're online.":"Wrong password."}
+  busy=false;render();
+}
+async function adminLogout(){
+  try{await firebase.auth().signOut();await firebase.auth().signInAnonymously()}catch(e){}
+  admin=false;tab="clock";editId=null;render();
 }
 function adminCard(){
-  if(admin)return `<div class="card"><h2>Office mode</h2><span class="at">You can edit and delete entries and manage added jobs.</span><div class="btns"><button class="btn plain" data-act="adminoff">Leave office mode</button></div></div>`;
-  return `<div class="card"><h2>Office login</h2><span class="at">Enter the office PIN to correct times or manage jobs.</span>
-    <div class="actions"><input class="pin" type="password" inputmode="numeric" autocomplete="off" id="pin" placeholder="PIN"><button class="btn plain" data-act="adminon">Unlock</button></div>
+  if(admin)return `<div class="card"><h2>Rohan (admin)</h2><span class="at">Signed in. You can see every timesheet, edit or delete entries, and download PDFs from the Hours tab.</span><div class="btns"><button class="btn plain" data-act="adminoff">Sign out</button></div></div>`;
+  if(!showLogin)return `<div style="text-align:center"><button class="link" data-act="showlogin">Office login</button></div>`;
+  return `<div class="card"><h2>Office login</h2>
+    <div class="chips"><button class="chip" aria-pressed="true" type="button">Rohan (admin)</button></div>
+    <div class="actions"><input class="pin" style="max-width:none" type="password" autocomplete="current-password" id="pw" placeholder="Password"><button class="btn plain" data-act="adminon" ${busy?"disabled":""}>Sign in</button></div>
     ${msg?`<div class="note">${esc(msg)}</div>`:""}</div>`;
+}
+
+/* ---------- PDF timesheets ---------- */
+function pdfTimesheets(){
+  if(!window.jspdf){msg="PDF tools didn't load.";return render()}
+  const {jsPDF}=window.jspdf,[a,b]=range(weekOff),label=weekLabel(a,b);
+  const doc=new jsPDF({unit:"pt",format:"letter"}),W=doc.internal.pageSize.getWidth();
+  const techs=TECHS.filter(t=>filter==="All"||t===filter);
+  const list=segs.filter(s=>s.start>=a&&s.start<b);
+  const head=(title,sub)=>{doc.setFont("helvetica","bold");doc.setFontSize(18);doc.setTextColor(11,46,87);doc.text("Vital Air",40,50);
+    doc.setFontSize(13);doc.setTextColor(16,38,63);doc.text(title,40,74);doc.setFont("helvetica","normal");doc.setFontSize(10);doc.setTextColor(90,109,128);doc.text(sub,40,90);
+    doc.text("Generated "+new Date().toLocaleString(),W-40,50,{align:"right"})};
+  const th={fillColor:[11,46,87]};
+  head("Timesheet summary",label+(mode==="period"?" · pay period (90:00 regular hours)":" · week"));
+  doc.autoTable({startY:104,head:[["Technician","Travel","Working","Total","Overtime"]],theme:"grid",headStyles:th,styles:{fontSize:10},
+    body:techs.map(t=>{const x=sum(list.filter(s=>s.tech===t)),p=x.t+x.w,ot=mode==="period"?Math.max(0,p-OT_LIMIT):0;return [t,hc(x.t),hc(x.w),hc(p),ot?hc(ot):"–"]}),
+    columnStyles:{1:{halign:"right"},2:{halign:"right"},3:{halign:"right"},4:{halign:"right"}}});
+  const sm=sum(list.filter(s=>techs.includes(s.tech)));
+  doc.setFontSize(9);doc.text("Hours shown as hours:minutes. Breaks are unpaid and not counted.",40,doc.lastAutoTable.finalY+18);
+  if(sm.t+sm.w===0)doc.text("No hours were logged in this range.",40,doc.lastAutoTable.finalY+32);
+  for(const t of techs){
+    doc.addPage();
+    const mine=list.filter(s=>s.tech===t).sort((x,y)=>x.start-y.start),x=sum(mine),p=x.t+x.w;
+    head(t,label);
+    doc.autoTable({startY:104,theme:"grid",headStyles:th,styles:{fontSize:9,cellPadding:4},
+      head:[["Date","Job","Type","Start","End","Hours","Note"]],
+      body:mine.length?mine.map(s=>[new Date(s.start).toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"}),shortCust(s.cust),s.type==="break"?"Break (unpaid)":TYPES[s.type]||"Working",tm(s.start),s.end==null?"on now":tm(s.end),hc(durOf(s)),[s.note,s.auto?"auto clock-out":"",s.edited?"edited":""].filter(Boolean).join(" · ")]):[[{content:"No hours logged.",colSpan:7,styles:{halign:"center"}}]],
+      columnStyles:{1:{cellWidth:150},5:{halign:"right"}}});
+    const y=doc.lastAutoTable.finalY+22;
+    doc.setFont("helvetica","bold");doc.setFontSize(11);doc.setTextColor(16,38,63);
+    doc.text(`Travel ${hc(x.t)}   Working ${hc(x.w)}   Total ${hc(p)}`+(mode==="period"&&p>OT_LIMIT?`   Overtime ${hc(p-OT_LIMIT)}`:""),40,y);
+  }
+  const n=doc.getNumberOfPages();
+  for(let i=1;i<=n;i++){doc.setPage(i);doc.setFontSize(8);doc.setTextColor(120);doc.text(`Page ${i} of ${n}`,W/2,doc.internal.pageSize.getHeight()-20,{align:"center"})}
+  saveFile("vital-air-timesheets-"+dayKey(a)+".pdf",doc.output("datauristring").split(",")[1],true);
 }
 
 /* ---------- in-app updates (Android APK from the GitHub release) ---------- */
@@ -346,7 +396,6 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkUpdat
 /* ---------- boot ---------- */
 window.addEventListener("online",()=>{online=true;render()});
 window.addEventListener("offline",()=>{online=false;render()});
-if(ls.get("va_admin")==="1")admin=true;
 render();
 (async()=>{
   const cfg=window.VA_CONFIG||{};
@@ -354,7 +403,9 @@ render();
   try{
     if(window.firebase&&cfg.firebase&&cfg.firebase.apiKey&&!/PASTE/i.test(cfg.firebase.apiKey)){
       firebase.initializeApp(cfg.firebase);
-      try{await firebase.auth().signInAnonymously()}catch(e){console.warn("anonymous sign-in failed",e);banner("Sign-in to the shared timesheet failed. Turn on Anonymous sign-in in Firebase (Authentication ▸ Sign-in method).")}
+      firebase.auth().onAuthStateChanged(u=>{admin=isAdminUser(u);if(admin)showLogin=false;render()});
+      try{await new Promise(r=>{const un=firebase.auth().onAuthStateChanged(()=>{un();r()})});
+        if(!firebase.auth().currentUser)await firebase.auth().signInAnonymously()}catch(e){console.warn("sign-in failed",e);banner("Sign-in to the shared timesheet failed. Turn on Anonymous sign-in in Firebase (Authentication ▸ Sign-in method).")}
       db=firebase.firestore();
       try{await db.enablePersistence({synchronizeTabs:true})}catch(e){}
     }

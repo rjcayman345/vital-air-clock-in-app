@@ -39,7 +39,7 @@ h2{font-family:var(--display);font-weight:400;font-size:22px;margin:0;color:var(
 .at{color:var(--muted);min-width:0;overflow-wrap:anywhere}
 .at b{color:var(--fg);font-weight:600}
 .field{display:flex;flex-direction:column;gap:6px;min-width:0}
-input[type=text],input[type=search],input[type=datetime-local],select{width:100%;padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--bg);min-height:48px}
+input[type=text],input[type=password],input[type=search],input[type=datetime-local],select{width:100%;padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--bg);min-height:48px}
 .results{display:flex;flex-direction:column;max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:12px}
 .results button{text-align:left;border:0;border-bottom:1px solid var(--line);background:transparent;padding:10px 14px;display:flex;flex-direction:column;gap:2px}
 .results button:last-child{border-bottom:0}
