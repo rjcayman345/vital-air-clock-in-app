@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
-let showLogin=false,update=null,updating=false,appVer=null,upMsg="";
+let impText="",impRows=null,impMsg="",showLogin=false,update=null,updating=false,appVer=null,upMsg="";
 let segs=[],loaded=false,busy=false,store=null,pending=false,online=navigator.onLine;
 let tab=location.hash==="#hours"?"hours":"clock";
 let tech=TECHS.includes(ls.get("va_tech"))?ls.get("va_tech"):null;
@@ -56,6 +56,7 @@ function localStore(){
     async addJob(d){EXTRA.push([d.name,"Added by "+(d.by||"office"),"j"+Date.now()]);ls.set("va_jobs",JSON.stringify(EXTRA))},
     async renameJob(id,name){const j=EXTRA.find(x=>x[2]===id);if(j)j[0]=name;ls.set("va_jobs",JSON.stringify(EXTRA))},
     async delJob(id){EXTRA=EXTRA.filter(x=>x[2]!==id);ls.set("va_jobs",JSON.stringify(EXTRA))},
+    async addMany(l){for(const d of l)segs.unshift({id:"l"+Date.now()+Math.random().toString(36).slice(2,6),...d});save();render()},
     async add(d){segs.unshift({id:"l"+Date.now()+Math.random().toString(36).slice(2,6),...d});save();render()},
     async patch(id,f){const s=segs.find(x=>x.id===id);if(s)Object.assign(s,f);save();render()},
     async del(id){segs=segs.filter(x=>x.id!==id);save();render()}};
@@ -78,6 +79,7 @@ function dbStore(db){
     renameJob:(id,name)=>fire(db.collection("jobs").doc(id).update({name})),
     delJob:id=>fire(db.collection("jobs").doc(id).delete()),
     add:d=>fire(col.doc().set(d)),
+    addMany:l=>{for(let i=0;i<l.length;i+=400){const b=db.batch();l.slice(i,i+400).forEach(d=>b.set(col.doc(),d));fire(b.commit())}return Promise.resolve()},
     patch:(id,f)=>fire(col.doc(id).update(f)),
     del:id=>fire(col.doc(id).delete())};
 }
@@ -222,6 +224,7 @@ function hoursView(){
   ${admin&&segs.some(s=>s.auto)?`<div class="card" id="review"><h2>Needs review</h2><span class="at">These were still running at the end of the day, so they were clocked out automatically at 11:59 PM. Tap Edit to set the real end time.</span><div class="log">${segs.filter(s=>s.auto).map(s=>`<div class="day">${dayName(s.start)}</div>`+segRow(s,true)).join("")}</div></div>`:""}
   <div class="card"><h2>By customer</h2>${custs.length?`<div class="scroll"><table>${head}<tbody>${custs.map(x=>tr(shortCust(x[0]),x[1])).join("")}</tbody></table></div>`:`<div class="empty">${loaded?"No hours logged this week. Each job the techs clock into will show here with its travel and working time.":"Loading…"}</div>`}</div>
   <div class="card"><div class="headrow"><h2>Entries</h2><span class="at">${admin?"Admin: tap Edit to change a time":"Only Rohan or Jaime can change times"}</span></div><div class="log">${days.length?days.map(d=>{const list=wk.filter(s=>dayKey(s.start)===d);return `<div class="day">${dayName(list[0].start)}</div>`+list.map(s=>segRow(s,true)).join("")}).join(""):`<div class="empty">${loaded?"Nothing to show for these dates.":"Loading…"}</div>`}</div></div>
+  ${importCard()}
   ${admin?`<div class="card" id="jobs"><h2>Added jobs</h2><span class="at">Jobs added from the Clock tab. Renaming one also renames it on the hours already logged.</span><div class="log">${EXTRA.length?EXTRA.map(j=>`<div class="row" style="grid-template-columns:1fr auto"><div class="who">${esc(j[0])}<small>${esc(j[1])}</small></div><div><button class="link" data-jobedit="${esc(j[2])}">${jobEdit===j[2]?"Close":"Rename"}</button></div>
     ${jobEdit===j[2]?`<div class="editbox"><label class="field"><span class="label">Job name</span><input type="text" id="job-name" maxlength="120" value="${esc(j[0])}"></label><div class="btns"><button class="btn plain" data-act="jobsave" ${busy?"disabled":""}>Save name</button><button class="btn del" data-act="jobdel" ${busy?"disabled":""}>${jobDel===j[2]?"Tap again to remove":"Remove job"}</button></div></div>`:""}</div>`).join(""):`<div class="empty">No jobs have been added yet. Any job a tech adds will list here so you can fix its name or remove it.</div>`}</div></div>`:""}
   ${adminCard()}${versionFooter()}`;
@@ -252,11 +255,14 @@ $("#view").addEventListener("click",e=>{
   const d=b.dataset;
   if(d.tech){if(tab==="hours")filter=d.tech;else{tech=d.tech;ls.set("va_tech",tech);const o=openSeg();if(o){cust=o.cust}}editId=null;return render()}
   if(d.cust){cust=d.cust;ls.set("va_cust",cust);picking=false;query="";return render()}
-  if((d.edit||d.jobedit||["save","del","cleardemo","jobsave","jobdel"].includes(d.act))&&!admin)return;
+  if((d.edit||d.jobedit||["save","del","cleardemo","jobsave","jobdel","imppreview","impgo"].includes(d.act))&&!admin)return;
   if(d.mode){mode=d.mode;weekOff=0;editId=null;return render()}
   if(d.jobedit){jobEdit=jobEdit===d.jobedit?null:d.jobedit;jobDel=null;return render()}
   if(d.edit){editId=editId===d.edit?null:d.edit;delArm=false;return render()}
   switch(d.act){
+    case "imppreview":{impText=($("#imp")||{}).value||"";impRows=parseImport(impText);impMsg="";render();break}
+    case "impgo":{if(!impRows||!impRows.rows.length)break;const list=impRows.rows.map(({_new,...x})=>x);
+      act(async()=>{await store.addMany(list);impMsg=list.length+" entries imported.";impText="";impRows=null})}break;
     case "checkupdate":checkUpdate(true);break;
     case "doupdate":doUpdate();break;
     case "adminon":adminLogin(($("#pw")||{}).value||"");break;
@@ -329,6 +335,51 @@ function adminCard(){
     <div class="chips"><button class="chip" aria-pressed="true" type="button">Rohan (admin)</button></div>
     <div class="actions"><input class="pin" style="max-width:none" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="off" id="pw" placeholder="PIN"><button class="btn plain" data-act="adminon" ${busy?"disabled":""}>Sign in</button></div>
     ${msg?`<div class="note">${esc(msg)}</div>`:""}</div>`;
+}
+
+/* ---------- import hours (admin) ---------- */
+// Paste rows: Date, Technician, Job, Type, Start, End, Note  (tab- or comma-separated; a header row is optional)
+function splitRow(line){const out=[];let cur="",q=false;const sep=line.includes("\t")?"\t":",";
+  for(let i=0;i<line.length;i++){const c=line[i];
+    if(q){if(c==='"'){if(line[i+1]==='"'){cur+='"';i++}else q=false}else cur+=c}
+    else if(c==='"')q=true;else if(c===sep){out.push(cur.trim());cur=""}else cur+=c}
+  out.push(cur.trim());return out}
+function parseDate(t){let m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return [+m[1],+m[2]-1,+m[3]];
+  m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);if(m)return [m[3].length===2?2000+ +m[3]:+m[3],+m[1]-1,+m[2]];return null}
+function parseTime(t){const m=t.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?$/i);if(!m)return null;
+  let h=+m[1];const mi=+(m[2]||0),ap=(m[3]||"").toLowerCase();
+  if(ap){if(h<1||h>12)return null;if(ap[0]==="p"&&h<12)h+=12;if(ap[0]==="a"&&h===12)h=0}
+  if(h>23||mi>59)return null;return [h,mi]}
+function parseImport(text){
+  const rows=[],errs=[];let n=0;
+  for(const raw of text.split(/\r?\n/)){
+    if(!raw.trim())continue;n++;const c=splitRow(raw);
+    if(n===1&&/^date$/i.test(c[0]))continue;
+    const [dt,tn,job,ty,st,en,note]=c,d=parseDate(dt||"");
+    const t=TECHS.find(x=>x.toLowerCase()===(tn||"").toLowerCase())||TECHS.find(x=>x.split(" ")[0].toLowerCase()===(tn||"").toLowerCase());
+    const type=/^trav/i.test(ty||"")?"travel":/^break/i.test(ty||"")?"break":/^(work|working)$/i.test(ty||"")?"work":null;
+    const a=parseTime(st||""),b=parseTime(en||"");
+    const why=!d?"bad date":!t?"unknown technician":!type?"type must be Travel, Working or Break":!a?"bad start time":!b?"bad end time":!(job||"").trim()?"missing job":null;
+    if(why){errs.push(`Line ${n}: ${why} (${raw.slice(0,60)})`);continue}
+    const start=new Date(d[0],d[1],d[2],a[0],a[1]).getTime();let end=new Date(d[0],d[1],d[2],b[0],b[1]).getTime();
+    if(end<=start)end+=86400000; // finished after midnight
+    const w=job.trim(),known=allCust().find(x=>x[0].toLowerCase()===w.toLowerCase())||allCust().find(x=>x[0].toLowerCase().includes(w.toLowerCase())&&w.length>=4);
+    rows.push({tech:t,cust:known?known[0]:w,type,start,end,note:(note||"").slice(0,140),edited:true,imported:true,editedAt:Date.now(),_new:!known});
+  }
+  return {rows,errs};
+}
+function importCard(){
+  if(!admin)return "";
+  const r=impRows;
+  return `<div class="card"><h2>Import hours</h2>
+    <span class="at">Paste one entry per line: <b>Date, Technician, Job, Type, Start, End, Note</b>. Example: <code>2026-10-05, Nimrod Buro, VA-001 / NCB Homes CPN 101, Working, 8:00 AM, 4:30 PM, AC repair</code>. Separate with commas or tabs, so a spreadsheet can be pasted straight in.</span>
+    <textarea id="imp" rows="6" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:12px;background:var(--bg);font:inherit" placeholder="Paste hours here">${esc(impText)}</textarea>
+    <div class="btns"><button class="btn plain" data-act="imppreview">Preview</button></div>
+    ${r?`<div class="note">${r.rows.length} entr${r.rows.length===1?"y":"ies"} ready to import${r.errs.length?`, ${r.errs.length} line${r.errs.length===1?"":"s"} skipped`:""}.${r.rows.some(x=>x._new)?" Jobs not found in the list are imported with the name as typed.":""}</div>
+      ${r.errs.length?`<div class="at flag">${r.errs.map(esc).join("<br>")}</div>`:""}
+      ${r.rows.length?`<div class="log">${r.rows.slice(0,8).map(x=>`<div class="row"><span class="tag ${x.type}">${TYPES[x.type]}</span><div class="who">${esc(shortCust(x.cust))}<small>${esc(x.tech)} · ${new Date(x.start).toLocaleDateString()} ${tm(x.start)} – ${tm(x.end)}</small></div><div class="dur">${hm(x.end-x.start)}</div></div>`).join("")}${r.rows.length>8?`<div class="empty">…and ${r.rows.length-8} more</div>`:""}</div>
+      <div class="btns"><button class="btn work" data-act="impgo" ${busy?"disabled":""}>Import ${r.rows.length} entr${r.rows.length===1?"y":"ies"}</button></div>`:""}`:""}
+    ${impMsg?`<div class="note">${esc(impMsg)}</div>`:""}</div>`;
 }
 
 /* ---------- PDF timesheets ---------- */
