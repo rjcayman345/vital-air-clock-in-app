@@ -41,6 +41,7 @@ function range(off){
   d.setDate(d.getDate()+(Math.floor(wks/2)+off)*14);const a=d.getTime();d.setDate(d.getDate()+14);return [a,d.getTime()];
 }
 function weekRange(off){const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7)+off*7);const a=d.getTime();d.setDate(d.getDate()+7);return [a,d.getTime()]}
+const siteOf=n=>{const c=allCust().find(x=>x[0]===n);if(!c)return "";return [c[0].includes(":")?c[0].split(":")[0]:"",c[1]].filter(Boolean).join(" · ")};
 const shortCust=n=>n.includes(":")?n.split(":").pop():n;
 function sum(list){let t=0,w=0;for(const s of list){if(s.type==="travel")t+=durOf(s);else if(s.type!=="break")w+=durOf(s)}return {t,w}}
 const paid=list=>{const s=sum(list);return s.t+s.w};
@@ -156,7 +157,7 @@ function custPicker(){
 function segRow(s,showTech){
   const editing=admin&&editId===s.id;
   return `<div class="row"><span class="tag ${s.type}">${TYPES[s.type]||"Working"}</span>
-  <div class="who">${esc(shortCust(s.cust))}<small>${showTech?esc(s.tech)+" · ":""}${tm(s.start)} – ${s.end==null?"now":tm(s.end)}${s.note?" · "+esc(s.note):""}${s.edited?" · edited":""}${s.type==="break"?" · unpaid":""}${s.auto?` · <b class="flag">auto clock-out, needs review</b>`:""}</small></div>
+  <div class="who">${esc(shortCust(s.cust))}${siteOf(s.cust)?`<small>${esc(siteOf(s.cust))}</small>`:""}<small>${showTech?esc(s.tech)+" · ":""}${tm(s.start)} – ${s.end==null?"now":tm(s.end)}${s.note?" · "+esc(s.note):""}${s.edited?" · edited":""}${s.type==="break"?" · unpaid":""}${s.auto?` · <b class="flag">auto clock-out, needs review</b>`:""}</small></div>
   <div class="dur"><span ${s.end==null?`data-live="${s.start}"`:""}>${hm(durOf(s))}</span>${admin?`<br><button class="link" data-edit="${esc(s.id)}">${editing?"Close":"Edit"}</button>`:""}</div>
   ${editing?`<div class="editbox">
     <label class="field"><span class="label">Started</span><input type="datetime-local" id="e-start" value="${toLocalInput(s.start)}"></label>
@@ -363,7 +364,7 @@ function parseImport(text){
     if(why){errs.push(`Line ${n}: ${why} (${raw.slice(0,60)})`);continue}
     const start=new Date(d[0],d[1],d[2],a[0],a[1]).getTime();let end=new Date(d[0],d[1],d[2],b[0],b[1]).getTime();
     if(end<=start)end+=86400000; // finished after midnight
-    const w=job.trim(),known=allCust().find(x=>x[0].toLowerCase()===w.toLowerCase())||allCust().find(x=>x[0].toLowerCase().includes(w.toLowerCase())&&w.length>=4);
+    const w=job.trim(),known=allCust().find(x=>x[0].toLowerCase()===w.toLowerCase())||(w.length>=4&&(h=>h.length===1?h[0]:null)(allCust().filter(x=>x[0].toLowerCase().includes(w.toLowerCase()))));
     rows.push({tech:t,cust:known?known[0]:w,type,start,end,note:(note||"").slice(0,140),edited:true,imported:true,editedAt:Date.now(),_new:!known});
   }
   return {rows,errs};
@@ -406,8 +407,8 @@ function pdfTimesheets(){
     head(t,label);
     doc.autoTable({startY:104,theme:"grid",headStyles:th,styles:{fontSize:9,cellPadding:4},
       head:[["Date","Job","Type","Start","End","Hours","Note"]],
-      body:mine.length?mine.map(s=>[new Date(s.start).toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"}),shortCust(s.cust),s.type==="break"?"Break (unpaid)":TYPES[s.type]||"Working",tm(s.start),s.end==null?"on now":tm(s.end),hc(durOf(s)),[s.note,s.auto?"auto clock-out":"",s.edited?"edited":""].filter(Boolean).join(" · ")]):[[{content:"No hours logged.",colSpan:7,styles:{halign:"center"}}]],
-      columnStyles:{1:{cellWidth:150},5:{halign:"right"}}});
+      body:mine.length?mine.map(s=>[new Date(s.start).toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"}),shortCust(s.cust)+(siteOf(s.cust)?"\n"+siteOf(s.cust):""),s.type==="break"?"Break (unpaid)":TYPES[s.type]||"Working",tm(s.start),s.end==null?"on now":tm(s.end),hc(durOf(s)),[s.note,s.auto?"auto clock-out":"",s.edited?"edited":""].filter(Boolean).join(" · ")]):[[{content:"No hours logged.",colSpan:7,styles:{halign:"center"}}]],
+      columnStyles:{1:{cellWidth:170},5:{halign:"right"}}});
     const y=doc.lastAutoTable.finalY+22;
     doc.setFont("helvetica","bold");doc.setFontSize(11);doc.setTextColor(16,38,63);
     doc.text(`Travel ${hc(x.t)}   Working ${hc(x.w)}   Total ${hc(p)}`+(mode==="period"&&p>OT_LIMIT?`   Overtime ${hc(p-OT_LIMIT)}`:""),40,y);
