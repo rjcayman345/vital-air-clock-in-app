@@ -11,6 +11,20 @@ Your Firebase project is already filled in (`www/config.js`). In the Firebase co
 3. **Authentication > Settings > User actions:** turn **off** "Enable create (sign-up)" so nobody can make accounts.
 4. **Firestore Database > Rules:** paste all of `firestore.rules` and **Publish**.
 
+## Tech logins (so techs only see their own hours)
+In **Authentication > Users > Add user**, add one user per tech (password = their 6-digit PIN):
+
+| Tech | Email to enter | Password |
+|---|---|---|
+| Nimrod Buro | `nimrod.buro@vitalair.app` | his 6-digit PIN |
+| Deavour Rose | `deavour.rose@vitalair.app` | his 6-digit PIN |
+| Rohan Dudhnath | `rohan.vitalair@gmail.com` (already added) | Rohan's PIN (same as admin) |
+
+The emails are not real mailboxes; they only name the login. On the Clock tab a tech taps their name and enters their PIN;
+the phone then stays signed in as them. The database rules let a tech read, add and close only their own entries.
+To add a tech later: add the name in `www/app.js` (`TECHS`), push, and create `first.last@vitalair.app` in Firebase.
+Then re-publish `firestore.rules` if it changed.
+
 ## Admin (Rohan)
 On the Clock tab, tap **Office login**, enter the PIN, and tap **Sign in**. The **Hours** tab then appears with every
 tech's timesheet, edit/delete on entries, job management, and **PDF timesheets** (a summary page plus one page per tech for
