@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
-let impText="",impRows=null,impMsg="",showLogin=false,update=null,updating=false,appVer=null,upMsg="";
+let myOff=0,impText="",impRows=null,impMsg="",showLogin=false,update=null,updating=false,appVer=null,upMsg="";
 let segs=[],loaded=false,busy=false,store=null,pending=false,online=navigator.onLine;
 let tab=location.hash==="#hours"?"hours":"clock";
 let tech=TECHS.includes(ls.get("va_tech"))?ls.get("va_tech"):null;
@@ -136,6 +136,16 @@ function statusBar(){
   if(pending)return `<div class="note">Syncing…</div>`;
   return "";
 }
+function myHoursCard(){
+  if(!tech)return "";
+  const sv=weekOff,sm=mode;mode="week";const [a,b]=weekRange(myOff);mode=sm;
+  const mine=segs.filter(s=>s.tech===tech&&s.start>=a&&s.start<b).sort((x,y)=>x.start-y.start),t=sum(mine);
+  const days=[...new Set(mine.map(s=>dayKey(s.start)))];
+  return `<div class="card"><div class="headrow"><h2>My hours</h2><span class="at">${esc(tech)}</span></div>
+    <div class="weeknav"><button class="btn plain" data-act="myprev">‹ Earlier</button><span class="mid">${weekLabel(a,b)}${myOff===0?" · this week":""}</span><button class="btn plain" data-act="mynext" ${myOff>=0?"disabled":""}>Later ›</button></div>
+    <div class="totals"><div><span class="label">Travel</span><b>${hm(t.t)}</b></div><div><span class="label">Working</span><b>${hm(t.w)}</b></div><div><span class="label">Total</span><b>${hm(t.t+t.w)}</b></div></div>
+    <div class="log">${days.length?days.map(d=>{const l=mine.filter(s=>dayKey(s.start)===d);return `<div class="day">${dayName(l[0].start)}</div>`+l.map(s=>segRow(s,false)).join("")}).join(""):`<div class="empty">${loaded?"No hours logged this week.":"Loading…"}</div>`}</div></div>`;
+}
 function versionFooter(){
   if(!native())return "";
   return `<div class="at" style="text-align:center">Version ${esc(appVer?appVer.name:"")} · <button class="link" data-act="checkupdate">Check for updates</button>${upMsg?`<br>${esc(upMsg)}`:""}</div>`;
@@ -199,6 +209,7 @@ function clockView(){
   <div class="card"><div class="headrow"><h2>This week</h2><span class="at">${weekLabel(wa,wb)} · hours:minutes</span></div>${dailyTable(week,wa,null,7)}
     ${(()=>{const m=mode;mode="period";const [pa,pb]=range(0);mode=m;const p=paid(segs.filter(s=>s.tech===tech&&s.start>=pa&&s.start<pb));
       return `<div class="at">Pay period ${weekLabel(pa,pb)}: <b>${hc(p)}</b> of 90:00 regular hours${p>OT_LIMIT?` · <b class="flag">overtime ${hc(p-OT_LIMIT)}</b>`:""}. Breaks are unpaid and not counted.</div>`})()}</div>`:""}
+  ${myHoursCard()}
   ${adminCard()}${versionFooter()}`;
 }
 function hoursView(){
@@ -254,7 +265,7 @@ $("#view").addEventListener("input",e=>{if(e.target.id==="q"){query=e.target.val
 $("#view").addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   const d=b.dataset;
-  if(d.tech){if(tab==="hours")filter=d.tech;else{tech=d.tech;ls.set("va_tech",tech);const o=openSeg();if(o){cust=o.cust}}editId=null;return render()}
+  if(d.tech){if(tab==="hours")filter=d.tech;else{myOff=0;tech=d.tech;ls.set("va_tech",tech);const o=openSeg();if(o){cust=o.cust}}editId=null;return render()}
   if(d.cust){cust=d.cust;ls.set("va_cust",cust);picking=false;query="";return render()}
   if((d.edit||d.jobedit||["save","del","cleardemo","jobsave","jobdel","imppreview","impgo"].includes(d.act))&&!admin)return;
   if(d.mode){mode=d.mode;weekOff=0;editId=null;return render()}
@@ -275,6 +286,8 @@ $("#view").addEventListener("click",e=>{
     case "work":start("work");break;
     case "break":start("break");break;
     case "out":clockOut();break;
+    case "myprev":myOff--;render();break;
+    case "mynext":myOff++;render();break;
     case "prev":weekOff--;editId=null;render();break;
     case "next":weekOff++;editId=null;render();break;
     case "csv":csv();break;
