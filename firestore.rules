@@ -2,28 +2,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    // Rohan (admin) signs in with his email + PIN. He is also the tech "Rohan Dudhnath".
     function isAdmin() {
       return signedIn()
         && request.auth.token.email == 'rohan.vitalair@gmail.com'
         && request.auth.token.firebase.sign_in_provider == 'password';
     }
-    // Each other tech signs in as <first>.<last>@vitalair.app (e.g. nimrod.buro@vitalair.app) with their PIN.
-    function isTech(name) {
-      return signedIn()
-        && request.auth.token.firebase.sign_in_provider == 'password'
-        && request.auth.token.email == name.lower().split(' ')[0] + '.' + name.lower().split(' ')[1] + '@vitalair.app';
-    }
 
-    // Clock entries: a tech can only see, add and close their own. Only the admin sees everyone's and can edit/delete.
+    // Clock entries. Techs can add entries and close their own open one; only the admin can edit or delete.
     match /punches/{id} {
-      allow read: if isAdmin() || isTech(resource.data.tech);
-      allow create: if (isAdmin() || isTech(request.resource.data.tech))
-                    && request.resource.data.keys().hasAll(['tech','cust','type','start'])
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.keys().hasAll(['tech','cust','type','start'])
                     && request.resource.data.type in ['travel','work','break'];
       allow update: if isAdmin()
-                    || (isTech(resource.data.tech) && resource.data.end == null
-                        && request.resource.data.tech == resource.data.tech
+                    || (signedIn() && resource.data.end == null
                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['end','auto']));
       allow delete: if isAdmin();
     }

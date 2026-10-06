@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ls={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
-let authTech=null,pinFor=null,pinMsg="",techBusy=false,myOff=0,impText="",impRows=null,impMsg="",showLogin=false,update=null,updating=false,appVer=null,upMsg="";
+let myOff=0,impText="",impRows=null,impMsg="",showLogin=false,update=null,updating=false,appVer=null,upMsg="";
 let segs=[],loaded=false,busy=false,store=null,pending=false,online=navigator.onLine;
 let tab=location.hash==="#hours"?"hours":"clock";
 let tech=TECHS.includes(ls.get("va_tech"))?ls.get("va_tech"):null;
@@ -67,24 +67,15 @@ function dbStore(db){
   // Offline-first: a write shows up in the snapshot instantly and syncs when the phone has signal,
   // so we don't wait on the server's acknowledgement (that would hang with no signal).
   const fire=p=>{p.catch(e=>{msg=e&&e.code==="permission-denied"?"That wasn't saved: the shared timesheet refused the change. Check the Firebase rules and sign-in setup.":"That wasn't saved. Try again.";render()});return Promise.resolve()};
-  // What this phone may read depends on who is signed in: the admin sees everyone, a tech only their own entries.
-  let unsub=null,scopeKey="";
-  const rescope=()=>{
-    const key=admin?"admin":authTech?"t:"+authTech:"none";if(key===scopeKey)return;scopeKey=key;
-    if(unsub){unsub();unsub=null}
-    if(key==="none"){segs=[];loaded=true;render();return}
-    loaded=false;
-    const q=admin?col.orderBy("start","desc").limit(1000):col.where("tech","==",authTech).limit(1000);
-    unsub=q.onSnapshot({includeMetadataChanges:true},snap=>{
-      segs=snap.docs.map(d=>{const x=d.data();return {id:d.id,...x,cust:norm(x.cust)}}).sort((x,y)=>y.start-x.start);loaded=true;
-      pending=snap.metadata.hasPendingWrites;
-      render();
-    },()=>{banner("The shared timesheet stopped responding. Check your signal, then reopen the app.")});
-  };
+  col.orderBy("start","desc").limit(1000).onSnapshot({includeMetadataChanges:true},snap=>{
+    segs=snap.docs.map(d=>{const x=d.data();return {id:d.id,...x,cust:norm(x.cust)}});loaded=true;
+    pending=snap.metadata.hasPendingWrites;
+    render();
+  },()=>{banner("The shared timesheet stopped responding. Check your signal, then reopen the app.")});
   db.collection("jobs").onSnapshot(snap=>{
     EXTRA=snap.docs.map(d=>({id:d.id,...d.data()})).filter(j=>j&&typeof j.name==="string").sort((x,y)=>(x.at||0)-(y.at||0)).map(j=>[norm(j.name),"Added by "+(j.by||"office"),j.id]);render();
   },()=>{});
-  return {shared:true,rescope,
+  return {shared:true,
     addJob:d=>fire(db.collection("jobs").doc().set(d)),
     renameJob:(id,name)=>fire(db.collection("jobs").doc(id).update({name})),
     delJob:id=>fire(db.collection("jobs").doc(id).delete()),
@@ -132,12 +123,9 @@ function render(){
   $("#wrap").classList.toggle("wide",tab==="hours");
   $("#tab-clock").setAttribute("aria-selected",tab==="clock");
   $("#tab-hours").setAttribute("aria-selected",tab==="hours");
-  const keepV={},focusId=document.activeElement&&document.activeElement.id;
-  ["tpin","pw","imp"].forEach(i=>{const e=$("#"+i);if(e)keepV[i]=e.value});
   const keep=document.activeElement&&document.activeElement.id==="q";
   $("#view").innerHTML=statusBar()+(tab==="clock"?clockView():hoursView());
   $("#view").style.cssText="display:flex;flex-direction:column;gap:16px";
-  for(const i in keepV){const e=$("#"+i);if(e){e.value=keepV[i];if(focusId===i){e.focus();try{e.setSelectionRange(e.value.length,e.value.length)}catch(_){}}}}
   if(keep&&$("#q")){const q=$("#q");q.focus();q.setSelectionRange(q.value.length,q.value.length)}
   tick();
 }
@@ -195,7 +183,7 @@ function clockView(){
   const [wa,wb]=weekRange(0);
   const week=tech?segs.filter(s=>s.tech===tech&&s.start>=wa&&s.start<wb):[];
   const stale=o&&Date.now()-o.start>14*3600000;
-  return `${techPicker()}
+  return `<div class="field"><span class="label">Technician</span>${techChips(false)}</div>
   <div class="card">
     <div class="date">${fullDate(Date.now())}</div>
     <span class="status ${o?o.type:"off"}">${o?(o.type==="travel"?"Travelling":o.type==="break"?"On break (unpaid)":"Working"):"Off the clock"}</span>
@@ -270,14 +258,14 @@ setInterval(tick,1000);
 
 /* ---------- events ---------- */
 function setTab(t){tab=t;editId=null;msg="";try{history.replaceState(null,"",t==="hours"?"#hours":"#clock")}catch(e){}render()}
-$("#view").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="pw")adminLogin(e.target.value);if(e.key==="Enter"&&e.target.id==="tpin")techLogin(e.target.value)});
+$("#view").addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="pw")adminLogin(e.target.value)});
 $("#tab-clock").onclick=()=>setTab("clock");
 $("#tab-hours").onclick=()=>setTab("hours");
 $("#view").addEventListener("input",e=>{if(e.target.id==="q"){query=e.target.value;render()}});
 $("#view").addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   const d=b.dataset;
-  if(d.tech){if(tab==="hours")filter=d.tech;else if(store&&store.shared){pinFor=d.tech;pinMsg="";return render()}else{myOff=0;tech=d.tech;ls.set("va_tech",tech);const o=openSeg();if(o){cust=o.cust}}editId=null;return render()}
+  if(d.tech){if(tab==="hours")filter=d.tech;else{myOff=0;tech=d.tech;ls.set("va_tech",tech);const o=openSeg();if(o){cust=o.cust}}editId=null;return render()}
   if(d.cust){cust=d.cust;ls.set("va_cust",cust);picking=false;query="";return render()}
   if((d.edit||d.jobedit||["save","del","cleardemo","jobsave","jobdel","imppreview","impgo"].includes(d.act))&&!admin)return;
   if(d.mode){mode=d.mode;weekOff=0;editId=null;return render()}
@@ -298,9 +286,6 @@ $("#view").addEventListener("click",e=>{
     case "work":start("work");break;
     case "break":start("break");break;
     case "out":clockOut();break;
-    case "techin":techLogin(($("#tpin")||{}).value||"");break;
-    case "techout":techLogout();break;
-    case "pincancel":pinFor=null;pinMsg="";render();break;
     case "myprev":myOff--;render();break;
     case "mynext":myOff++;render();break;
     case "prev":weekOff--;editId=null;render();break;
@@ -344,10 +329,6 @@ async function saveFile(filename,data,isB64){
 /* ---------- office (admin) mode: Rohan signs in with a password ---------- */
 // Real protection is in firestore.rules: only the admin account can edit/delete entries.
 const adminEmail=()=>String((window.VA_CONFIG&&VA_CONFIG.adminEmail)||"").toLowerCase();
-const ADMIN_TECH="Rohan Dudhnath";
-// Each tech has their own Firebase login: <first>.<last>@vitalair.app with their PIN as the password.
-// Rohan's tech login is his admin account, so one PIN covers both.
-const techEmail=n=>n===ADMIN_TECH?adminEmail():n.toLowerCase().replace(/\s+/g,".")+"@vitalair.app";
 const isAdminUser=u=>!!u&&!u.isAnonymous&&String(u.email||"").toLowerCase()===adminEmail();
 async function adminLogin(pw){
   if(!pw){msg="Enter your PIN.";return render()}
@@ -356,24 +337,6 @@ async function adminLogin(pw){
   try{await firebase.auth().signInWithEmailAndPassword(adminEmail(),pw);msg=""}
   catch(e){msg=/network/i.test(e.code||"")?"No signal. Try again when you're online.":"Wrong PIN."}
   busy=false;render();
-}
-async function techLogin(pin){
-  if(!pinFor)return;if(!pin){pinMsg="Enter your PIN.";return render()}
-  techBusy=true;pinMsg="";render();
-  try{await firebase.auth().signInWithEmailAndPassword(techEmail(pinFor),pin);pinFor=null;pinMsg=""}
-  catch(e){pinMsg=/network/i.test(e.code||"")?"No signal. Try again when you're online.":/too-many/i.test(e.code||"")?"Too many tries. Wait a few minutes.":"Wrong PIN, or your login isn't set up yet. Ask Rohan."}
-  techBusy=false;render();
-}
-async function techLogout(){
-  try{await firebase.auth().signOut();await firebase.auth().signInAnonymously()}catch(e){}
-  authTech=null;tech=null;cust=null;render();
-}
-function techPicker(){
-  if(!store||!store.shared)return `<div class="field"><span class="label">Technician</span>${techChips(false)}</div>`;
-  if(authTech)return `<div class="headrow"><span class="at">Signed in as <b>${esc(authTech)}</b></span><button class="link" data-act="techout">Not you? Sign out</button></div>`;
-  return `<div class="field"><span class="label">Technician</span>${techChips(false)}</div>`+(pinFor?`<div class="card"><h2>${esc(pinFor)}</h2><span class="at">Enter your PIN.</span>
-    <div class="actions"><input class="pin" style="max-width:none" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="off" id="tpin" placeholder="PIN"><button class="btn plain" data-act="techin" ${techBusy?"disabled":""}>Sign in</button></div>
-    ${pinMsg?`<div class="note">${esc(pinMsg)}</div>`:""}<div><button class="link" data-act="pincancel">Cancel</button></div></div>`:"");
 }
 async function adminLogout(){
   try{await firebase.auth().signOut();await firebase.auth().signInAnonymously()}catch(e){}
@@ -505,21 +468,14 @@ render();
   try{
     if(window.firebase&&cfg.firebase&&cfg.firebase.apiKey&&!/PASTE/i.test(cfg.firebase.apiKey)){
       firebase.initializeApp(cfg.firebase);
-      tech=null;
-      firebase.auth().onAuthStateChanged(u=>{
-        admin=isAdminUser(u);if(admin)showLogin=false;
-        authTech=u&&!u.isAnonymous?TECHS.find(t=>techEmail(t).toLowerCase()===String(u.email||"").toLowerCase())||null:null;
-        tech=authTech;if(authTech){const o=openSeg();if(o)cust=o.cust}
-        if(store&&store.rescope)store.rescope();
-        render();
-      });
+      firebase.auth().onAuthStateChanged(u=>{admin=isAdminUser(u);if(admin)showLogin=false;render()});
       try{await new Promise(r=>{const un=firebase.auth().onAuthStateChanged(()=>{un();r()})});
         if(!firebase.auth().currentUser)await firebase.auth().signInAnonymously()}catch(e){console.warn("sign-in failed",e);banner("Sign-in to the shared timesheet failed ("+((e&&e.code)||(e&&e.message)||"unknown")+"). "+(/operation-not-allowed|admin-restricted/.test((e&&e.code)||"")?"Turn on Anonymous sign-in in Firebase (Authentication ▸ Sign-in method).":/network/.test((e&&e.code)||"")?"Check this phone's internet connection.":"Send this code to the developer."))}
       db=firebase.firestore();
       try{await db.enablePersistence({synchronizeTabs:true})}catch(e){}
     }
   }catch(e){console.warn(e)}
-  if(db){store=dbStore(db);store.rescope()}
+  if(db)store=dbStore(db);
   else{store=localStore();banner("The shared timesheet isn't set up yet, so hours are saving on this phone only. See SETUP.md to connect it.")}
   const o=tech&&openSeg();if(o)cust=o.cust;
   render();
