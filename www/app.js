@@ -12,7 +12,9 @@ let cust=ls.get("va_cust")?String(ls.get("va_cust")).replace(/GS[Ll]\s*-\s*/g,"V
 const NONJOB=[["Shop time","Non-job time"],["Parts pickup","Non-job time"],["Training","Non-job time"]];
 const allCust=()=>NONJOB.concat(CUST,EXTRA);
 const norm=n=>String(n||"").replace(/GS[Ll]\s*-\s*/g,"VA-");
-const OT_LIMIT=90*3600000, PERIOD_ANCHOR=new Date(2026,8,28).getTime();
+const OT_LIMIT=90*3600000;
+// Bi-weekly pay periods: 14 days each. One period ran Sep 23 – Oct 6, 2026 (cutoff Oct 6), so the next runs Oct 7 – Oct 20, and so on.
+const PERIOD_START=[2026,8,23];
 const TYPES={travel:"Travel",work:"Working",break:"Break"};
 let picking=false,query="",weekOff=0,filter="All",editId=null,delArm=false,msg="",adding=false,admin=false,mode="week",jobEdit=null,jobDel=null;
 
@@ -37,8 +39,9 @@ function dailyTable(list,a,techs,nd){
 const toLocalInput=ms=>ms==null?"":new Date(ms-new Date(ms).getTimezoneOffset()*60000).toISOString().slice(0,16);
 function range(off){
   if(mode==="week")return weekRange(off);
-  const wks=Math.round((weekRange(0)[0]-PERIOD_ANCHOR)/604800000),d=new Date(PERIOD_ANCHOR);
-  d.setDate(d.getDate()+(Math.floor(wks/2)+off)*14);const a=d.getTime();d.setDate(d.getDate()+14);return [a,d.getTime()];
+  const t=new Date(),days=Math.round((Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())-Date.UTC(...PERIOD_START))/86400000);
+  const d=new Date(PERIOD_START[0],PERIOD_START[1],PERIOD_START[2]+(Math.floor(days/14)+off)*14);
+  const a=d.getTime();d.setDate(d.getDate()+14);return [a,d.getTime()];
 }
 function weekRange(off){const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7)+off*7);const a=d.getTime();d.setDate(d.getDate()+7);return [a,d.getTime()]}
 const siteOf=n=>{const c=allCust().find(x=>x[0]===n);if(!c)return "";return [c[0].includes(":")?c[0].split(":")[0]:"",c[1]].filter(Boolean).join(" · ")};
@@ -224,7 +227,7 @@ function hoursView(){
   const days=[...new Set(wk.map(s=>dayKey(s.start)))];
   return `<div class="card">
     <div class="weeknav"><button class="btn plain" data-act="prev">‹ Earlier</button><span class="mid">${weekLabel(a,b)}${weekOff===0?(mode==="week"?" · this week":" · current pay period"):""}</span><button class="btn plain" data-act="next" ${weekOff>=0?"disabled":""}>Later ›</button></div>
-    <div class="chips"><button class="chip" data-mode="week" aria-pressed="${mode==="week"}">Week</button><button class="chip" data-mode="period" aria-pressed="${mode==="period"}">Pay period (2 weeks)</button></div>
+    <div class="chips"><button class="chip" data-mode="week" aria-pressed="${mode==="week"}">Week</button><button class="chip" data-mode="period" aria-pressed="${mode==="period"}">Pay period (cutoff every 2 weeks)</button></div>
     ${techChips(true)}
     ${mode==="week"?`<div class="scroll"><table>${head}<tbody>${byTech.map(x=>tr(x[0],x[1])).join("")}</tbody>${filter==="All"?`<tfoot>${tr("All technicians",all)}</tfoot>`:""}</table></div>`
     :`<div class="scroll"><table><thead><tr><th></th><th>Paid</th><th>Regular</th><th>Overtime</th></tr></thead><tbody>${byTech.map(x=>{const p=x[1].t+x[1].w,ot=Math.max(0,p-OT_LIMIT);return `<tr><td>${esc(x[0])}</td><td>${hc(p)}</td><td>${hc(p-ot)}</td><td>${ot?`<b class="flag">${hc(ot)}</b>`:"0:00"}</td></tr>`}).join("")}</tbody></table></div>
